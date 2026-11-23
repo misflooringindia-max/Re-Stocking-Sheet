@@ -23,8 +23,8 @@ self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
   const url = new URL(event.request.url);
 
-  // Skip chrome-extension and remote API calls
-  if (!url.protocol.startsWith('http')) return;
+  // Skip chrome-extension, non-http, and /api/ routes
+  if (!url.protocol.startsWith('http') || url.pathname.startsWith('/api/')) return;
 
   event.respondWith(
     caches.match(event.request).then((cachedResponse) => {

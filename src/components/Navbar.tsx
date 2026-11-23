@@ -3,9 +3,8 @@ import { useInventory } from '../context/InventoryContext';
 import {
   Boxes,
   Search,
-  Wifi,
   WifiOff,
-  Download,
+  RefreshCw,
   History,
   ShoppingCart,
   QrCode,
@@ -13,6 +12,7 @@ import {
   Table as TableIcon,
   SlidersHorizontal,
   X,
+  FileSpreadsheet,
 } from 'lucide-react';
 
 interface NavbarProps {
@@ -36,6 +36,9 @@ export const Navbar: React.FC<NavbarProps> = ({
     filters,
     setFilters,
     isOnline,
+    isSyncing,
+    syncFromLiveSheet,
+    modifiedCount,
     stats,
     categories,
     colors,
@@ -55,15 +58,19 @@ export const Navbar: React.FC<NavbarProps> = ({
               <div className="flex items-center gap-2">
                 <span className="font-extrabold text-base tracking-tight text-white">StockSync</span>
                 <span className="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
-                  Google Sheet Pro
+                  Live Sheet
                 </span>
               </div>
               <div className="flex items-center gap-2 text-[11px] text-slate-400">
                 <span className="flex items-center gap-1">
                   {isOnline ? (
                     <span className="flex items-center gap-1 text-emerald-400 font-semibold">
-                      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                      Live Sync
+                      <span
+                        className={`w-2 h-2 rounded-full bg-emerald-500 ${
+                          isSyncing ? 'animate-ping' : 'animate-pulse'
+                        }`}
+                      />
+                      {isSyncing ? 'Syncing...' : 'Live Sync'}
                     </span>
                   ) : (
                     <span className="flex items-center gap-1 text-amber-400 font-semibold">
@@ -74,7 +81,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 </span>
                 <span className="hidden sm:inline text-slate-600">•</span>
                 <span className="hidden sm:inline text-slate-300 font-medium">
-                  {stats.totalSkus} Total Products
+                  {stats.totalSkus.toLocaleString()} Total Products
                 </span>
               </div>
             </div>
@@ -165,14 +172,33 @@ export const Navbar: React.FC<NavbarProps> = ({
               )}
             </button>
 
-            {/* Google Sheet Sync / Export Button */}
+            {/* Quick Refresh from Live Sheet */}
+            <button
+              onClick={() => syncFromLiveSheet()}
+              disabled={isSyncing || !isOnline}
+              className="p-1.5 sm:px-2.5 sm:py-1.5 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-emerald-300 text-xs font-bold flex items-center gap-1.5 transition-all disabled:opacity-40"
+              title="Refresh Live Google Sheet Now"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
+              <span className="hidden lg:inline">{isSyncing ? 'Syncing' : 'Refresh'}</span>
+            </button>
+
+            {/* Google Sheet Link & Export Modal Button */}
             <button
               onClick={onOpenSync}
-              className="px-3.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold flex items-center gap-1.5 transition-all shadow-xs shadow-indigo-600/30"
-              title="Sync & Export to Google Sheet"
+              className="relative px-3.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold flex items-center gap-1.5 transition-all shadow-xs shadow-indigo-600/30"
+              title="Direct Sheet Link & Export"
             >
-              <Download className="w-3.5 h-3.5" />
+              <FileSpreadsheet className="w-3.5 h-3.5" />
               <span className="hidden sm:inline">Sheet Sync</span>
+              {modifiedCount > 0 && (
+                <span
+                  className="px-1.5 py-0.2 rounded-full bg-white text-indigo-900 text-[10px] font-black shadow-xs"
+                  title={`${modifiedCount} local edits`}
+                >
+                  {modifiedCount}
+                </span>
+              )}
             </button>
           </div>
         </div>

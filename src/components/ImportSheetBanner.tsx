@@ -1,14 +1,13 @@
 import React, { useState } from 'react';
 import { useInventory } from '../context/InventoryContext';
-import { 
-  FileSpreadsheet, 
-  Upload, 
-  Link2, 
-  Check, 
-  AlertCircle, 
-  Sparkles,
-  ArrowRight,
-  Database
+import {
+  FileSpreadsheet,
+  Upload,
+  Link2,
+  Check,
+  AlertCircle,
+  Database,
+  RefreshCw,
 } from 'lucide-react';
 
 interface ImportSheetBannerProps {
@@ -16,13 +15,19 @@ interface ImportSheetBannerProps {
 }
 
 export const ImportSheetBanner: React.FC<ImportSheetBannerProps> = ({ onOpenSync }) => {
-  const { stats, importCsvData, importFromGoogleSheetUrl, isLoading } = useInventory();
-  const [sheetUrl, setSheetUrl] = useState('');
+  const {
+    stats,
+    importCsvData,
+    syncFromLiveSheet,
+    connectedSheetUrl,
+    lastSyncTime,
+    isSyncing,
+    isOnline,
+    syncError,
+  } = useInventory();
   const [status, setStatus] = useState<string | null>(null);
   const [isError, setIsError] = useState(false);
-  const [isExpanded, setIsExpanded] = useState(false);
 
-  // If user already loaded more than 1000 items, keep banner subtle
   const hasLoadedFull = stats.totalSkus > 1000;
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -37,7 +42,7 @@ export const ImportSheetBanner: React.FC<ImportSheetBannerProps> = ({ onOpenSync
         const res = importCsvData(content);
         if (res.success) {
           setIsError(false);
-          setStatus(`🎉 Success! Loaded all ${res.count.toLocaleString()} items from your spreadsheet.`);
+          setStatus(`Loaded all ${res.count.toLocaleString()} items from CSV.`);
         } else {
           setIsError(true);
           setStatus(res.error || 'Failed to parse spreadsheet file.');
@@ -47,37 +52,65 @@ export const ImportSheetBanner: React.FC<ImportSheetBannerProps> = ({ onOpenSync
     reader.readAsText(file);
   };
 
-  const handleUrlSync = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!sheetUrl.trim()) return;
-
-    setStatus('Fetching full sheet records...');
-    const res = await importFromGoogleSheetUrl(sheetUrl);
+  const handleDirectSync = async () => {
+    setStatus('Syncing latest articles from Google Sheet...');
+    setIsError(false);
+    const res = await syncFromLiveSheet(connectedSheetUrl);
     if (res.success) {
       setIsError(false);
-      setStatus(`🎉 Success! Loaded all ${res.count.toLocaleString()} products directly from your Google Sheet.`);
-      setSheetUrl('');
+      setStatus(`Synced ${res.count.toLocaleString()} products from your Google Sheet.`);
     } else {
       setIsError(true);
-      setStatus(res.error || 'Failed to fetch spreadsheet. Make sure sheet is shared with "Anyone with link can view"');
+      setStatus(res.error || 'Failed to sync Google Sheet.');
     }
   };
 
-  if (hasLoadedFull && !isExpanded) {
+  const formattedLastSync = (() => {
+    try {
+      return new Date(lastSyncTime).toLocaleTimeString('en-US', {
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+    } catch {
+      return '';
+    }
+  })();
+
+  if (hasLoadedFull) {
     return (
-      <div className="bg-slate-800/60 border border-slate-700/60 rounded-xl px-4 py-2 flex items-center justify-between text-xs text-slate-300">
+      <div className="bg-slate-800/70 border border-slate-700/70 rounded-xl px-4 py-2 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-300">
         <div className="flex items-center gap-2">
-          <Database className="w-4 h-4 text-emerald-400" />
+          <Database className="w-4 h-4 text-emerald-400 shrink-0" />
           <span>
-            <strong className="text-white font-bold">{stats.totalSkus.toLocaleString()}</strong> articles active in database.
+            <strong className="text-white font-bold">{stats.totalSkus.toLocaleString()}</strong> articles synced
+            via direct Google Sheet link
+            {formattedLastSync && (
+              <span className="text-slate-400 ml-1.5">• Last synced {formattedLastSync}</span>
+            )}
           </span>
         </div>
-        <button
-          onClick={() => setIsExpanded(true)}
-          className="text-indigo-400 hover:text-indigo-300 font-bold"
-        >
-          Update or Sync Sheet →
-        </button>
+        <div className="flex items-center gap-3">
+          {syncError && (
+            <span className="text-rose-400 font-semibold flex items-center gap-1">
+              <AlertCircle className="w-3.5 h-3.5" />
+              Sync error
+            </span>
+          )}
+          <button
+            onClick={handleDirectSync}
+            disabled={isSyncing || !isOnline}
+            className="text-emerald-400 hover:text-emerald-300 disabled:opacity-40 font-bold flex items-center gap-1"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
+            <span>{isSyncing ? 'Syncing...' : 'Refresh Sheet'}</span>
+          </button>
+          <button
+            onClick={onOpenSync}
+            className="text-indigo-400 hover:text-indigo-300 font-bold"
+          >
+            Manage Link & Export →
+          </button>
+        </div>
       </div>
     );
   }
@@ -91,24 +124,31 @@ export const ImportSheetBanner: React.FC<ImportSheetBannerProps> = ({ onOpenSync
               <FileSpreadsheet className="w-4 h-4" />
             </span>
             <span className="text-xs font-bold uppercase tracking-wider text-indigo-300">
-              Complete Catalogue Loader (3,500+ Items)
+              Direct Google Sheet Link Sync (3,285+ Items)
             </span>
           </div>
           <h2 className="text-sm sm:text-base font-extrabold text-white">
-            Ready to load your entire 3,500+ products spreadsheet?
+            Sync your live Google Sheet directly
           </h2>
           <p className="text-xs text-slate-300 leading-relaxed">
-            Currently showing <strong className="text-amber-300 font-bold">{stats.totalSkus}</strong> items.
-            Upload your full Google Sheet (.csv) or paste your Google Sheet link to import all 3,500+ articles instantly with persistent offline storage.
+            Currently showing <strong className="text-amber-300 font-bold">{stats.totalSkus.toLocaleString()}</strong> items.
+            Click <strong>Sync Live Sheet</strong> to pull all articles from your connected direct Google Sheet CSV link.
           </p>
         </div>
 
-        {/* Quick Upload & Paste Link Form */}
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full md:w-auto shrink-0">
-          {/* File Picker button */}
-          <label className="cursor-pointer px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold flex items-center justify-center gap-2 shadow-md shadow-indigo-600/30 transition-all">
-            <Upload className="w-4 h-4" />
-            <span>Upload Full 3500+ CSV File</span>
+          <button
+            onClick={handleDirectSync}
+            disabled={isSyncing || !isOnline}
+            className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white text-xs font-bold flex items-center justify-center gap-2 shadow-md shadow-indigo-600/30 transition-all"
+          >
+            <RefreshCw className={`w-4 h-4 ${isSyncing ? 'animate-spin' : ''}`} />
+            <span>{isSyncing ? 'Syncing Sheet...' : 'Sync Live Sheet Now'}</span>
+          </button>
+
+          <label className="cursor-pointer px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold flex items-center justify-center gap-2 border border-slate-700 transition-colors">
+            <Upload className="w-4 h-4 text-sky-400" />
+            <span>Upload CSV</span>
             <input
               type="file"
               accept=".csv,.txt"
@@ -117,27 +157,30 @@ export const ImportSheetBanner: React.FC<ImportSheetBannerProps> = ({ onOpenSync
             />
           </label>
 
-          {/* Or Connect URL */}
           <button
             onClick={onOpenSync}
             className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold flex items-center justify-center gap-2 border border-slate-700 transition-colors"
           >
-            <Link2 className="w-4 h-4 text-sky-400" />
-            <span>Google Sheet URL Sync</span>
+            <Link2 className="w-4 h-4 text-emerald-400" />
+            <span>Change Link</span>
           </button>
         </div>
       </div>
 
-      {status && (
+      {(status || syncError) && (
         <div
           className={`mt-3 p-3 rounded-xl text-xs font-semibold flex items-center gap-2 ${
-            isError
+            isError || syncError
               ? 'bg-rose-950/80 text-rose-300 border border-rose-800'
               : 'bg-emerald-950/80 text-emerald-300 border border-emerald-800'
           }`}
         >
-          {isError ? <AlertCircle className="w-4 h-4 shrink-0" /> : <Check className="w-4 h-4 shrink-0" />}
-          <span>{status}</span>
+          {isError || syncError ? (
+            <AlertCircle className="w-4 h-4 shrink-0" />
+          ) : (
+            <Check className="w-4 h-4 shrink-0" />
+          )}
+          <span>{status || syncError}</span>
         </div>
       )}
     </div>

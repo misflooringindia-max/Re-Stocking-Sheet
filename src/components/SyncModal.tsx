@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useInventory } from '../context/InventoryContext';
+import { DEFAULT_PUBLISHED_SHEET_URL } from '../utils/csvHelper';
 import {
   X,
   FileSpreadsheet,
@@ -11,11 +12,9 @@ import {
   Link2,
   RefreshCw,
   AlertCircle,
-  LogIn,
-  LogOut,
-  Send,
-  ExternalLink,
-  Layers,
+  Wifi,
+  WifiOff,
+  CheckCircle2,
 } from 'lucide-react';
 
 interface SyncModalProps {
@@ -28,92 +27,75 @@ export const SyncModal: React.FC<SyncModalProps> = ({ isOpen, onClose }) => {
     items,
     exportCsv,
     copyTsvToClipboard,
+    copyModifiedTsvToClipboard,
+    clearModifiedFlags,
+    modifiedCount,
     importCsvData,
-    connectAndSyncWithGoogleAccount,
-    pushChangesToGoogleSheet,
-    googleUser,
-    handleGoogleLogin,
-    handleGoogleLogout,
-    connectedSheetId,
-    connectedSheetTitle,
-    availableTabs,
-    selectedTab,
-    setSelectedTab,
-    resetToDefault,
+    syncFromLiveSheet,
+    connectedSheetUrl,
+    autoSyncEnabled,
+    setAutoSyncEnabled,
+    isSyncing,
+    isOnline,
     lastSyncTime,
+    resetToDefault,
     isLoading,
   } = useInventory();
 
   const [copied, setCopied] = useState(false);
-  const [googleSheetUrl, setGoogleSheetUrl] = useState('');
+  const [copiedModified, setCopiedModified] = useState(false);
+  const [sheetUrlInput, setSheetUrlInput] = useState(connectedSheetUrl);
   const [importStatus, setImportStatus] = useState<string | null>(null);
   const [isError, setIsError] = useState(false);
-  const [isSyncing, setIsSyncing] = useState(false);
-  const [isPushing, setIsPushing] = useState(false);
 
   useEffect(() => {
-    if (connectedSheetId && !googleSheetUrl) {
-      setGoogleSheetUrl(`https://docs.google.com/spreadsheets/d/${connectedSheetId}/edit`);
-    }
-  }, [connectedSheetId]);
+    setSheetUrlInput(connectedSheetUrl);
+  }, [connectedSheetUrl, isOpen]);
 
   if (!isOpen) return null;
 
-  const handleCopy = async () => {
+  const handleCopyAll = async () => {
     const success = await copyTsvToClipboard();
     if (success) {
       setCopied(true);
+      clearModifiedFlags();
       setTimeout(() => setCopied(false), 2500);
     }
   };
 
-  const handleGoogleSync = async (e?: React.FormEvent, tabTitle?: string) => {
-    if (e) e.preventDefault();
-    const urlToUse = googleSheetUrl.trim();
-    if (!urlToUse) {
-      setIsError(true);
-      setImportStatus('Please paste your Google Sheet link or ID first.');
-      return;
-    }
-
-    setIsSyncing(true);
-    setImportStatus('Connecting to Google Sheets and reading articles...');
-
-    const res = await connectAndSyncWithGoogleAccount(urlToUse, tabTitle || selectedTab || undefined);
-    setIsSyncing(false);
-
-    if (res.success) {
-      setIsError(false);
-      setImportStatus(`🎉 Successfully synced! Loaded all ${res.count.toLocaleString()} articles directly from your Google Sheet.`);
-    } else {
-      setIsError(true);
-      setImportStatus(res.error || 'Could not access spreadsheet. If private, please ensure you sign in with your Google account.');
+  const handleCopyModified = async () => {
+    const success = await copyModifiedTsvToClipboard();
+    if (success) {
+      setCopiedModified(true);
+      setTimeout(() => setCopiedModified(false), 2500);
     }
   };
 
-  const handlePushBack = async () => {
-    if (!connectedSheetId) {
+  const handleDirectSync = async (e?: React.FormEvent, preserveLocalEdits = true) => {
+    if (e) e.preventDefault();
+    const urlToUse = sheetUrlInput.trim();
+    if (!urlToUse) {
       setIsError(true);
-      setImportStatus('Please connect and sync your Google Sheet first.');
+      setImportStatus('Please paste your Google Sheet direct CSV or share link.');
       return;
     }
 
-    const confirmed = window.confirm(
-      `Sync all ${items.length.toLocaleString()} articles back to Google Sheet (${connectedSheetTitle || connectedSheetId})? This will update the STOCK and Simplified columns in your spreadsheet.`
-    );
-    if (!confirmed) return;
+    setIsError(false);
+    setImportStatus('Fetching live inventory data from your Google Sheet...');
 
-    setIsPushing(true);
-    setImportStatus('Writing master record changes back to Google Sheet...');
-    const res = await pushChangesToGoogleSheet();
-    setIsPushing(false);
-
+    const res = await syncFromLiveSheet(urlToUse, { preserveLocalEdits });
     if (res.success) {
       setIsError(false);
-      setImportStatus(`🎉 Updated ${res.count.toLocaleString()} rows in your Google Sheet successfully!`);
+      const changeInfo =
+        res.changedCount && res.changedCount > 0
+          ? ` (${res.changedCount.toLocaleString()} updated/new)`
+          : ' (all records up to date)';
+      setImportStatus(`Synced ${res.count.toLocaleString()} articles from Google Sheet${changeInfo}.`);
     } else {
       setIsError(true);
-      setImportStatus(res.error || 'Failed to update Google Sheet. Please check permissions.');
+      setImportStatus(
+        res.error || 'Could not load sheet. Make sure the link is published to web as CSV or shared publicly.'
+      );
     }
   };
 
@@ -129,7 +111,7 @@ export const SyncModal: React.FC<SyncModalProps> = ({ isOpen, onClose }) => {
         const res = importCsvData(content);
         if (res.success) {
           setIsError(false);
-          setImportStatus(`🎉 Successfully imported all ${res.count.toLocaleString()} articles into database!`);
+          setImportStatus(`Successfully imported all ${res.count.toLocaleString()} articles into database.`);
         } else {
           setIsError(true);
           setImportStatus(res.error || 'Invalid CSV format.');
@@ -138,6 +120,19 @@ export const SyncModal: React.FC<SyncModalProps> = ({ isOpen, onClose }) => {
     };
     reader.readAsText(file);
   };
+
+  const formattedLastSync = (() => {
+    try {
+      return new Date(lastSyncTime).toLocaleString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+    } catch {
+      return lastSyncTime;
+    }
+  })();
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-150">
@@ -150,10 +145,10 @@ export const SyncModal: React.FC<SyncModalProps> = ({ isOpen, onClose }) => {
             </div>
             <div>
               <h2 className="text-base font-extrabold text-white flex items-center gap-2">
-                Google Sheets Live Sync Hub
+                Direct Google Sheet Sync Hub
               </h2>
               <p className="text-xs text-slate-400">
-                Sync all 3,500+ articles directly with your Google Sheet in real time
+                Real-time CSV link sync with offline IndexedDB storage — no sign-in required
               </p>
             </div>
           </div>
@@ -167,153 +162,103 @@ export const SyncModal: React.FC<SyncModalProps> = ({ isOpen, onClose }) => {
 
         {/* Content */}
         <div className="p-4 sm:p-6 overflow-y-auto space-y-5">
-          {/* Google Account Authentication Strip */}
-          <div className="p-4 rounded-2xl bg-slate-800/90 border border-slate-700 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
-            <div className="flex items-center gap-3">
-              {googleUser ? (
-                <div className="w-9 h-9 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 flex items-center justify-center font-bold text-xs uppercase">
-                  {googleUser.email?.slice(0, 2) || 'GU'}
-                </div>
+          {/* Connection Status Strip */}
+          <div className="p-3.5 rounded-2xl bg-slate-800/90 border border-slate-700 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5 text-xs">
+              {isOnline ? (
+                <span className="p-1.5 rounded-lg bg-emerald-500/20 text-emerald-400">
+                  <Wifi className="w-4 h-4" />
+                </span>
               ) : (
-                <div className="w-9 h-9 rounded-full bg-slate-700 text-slate-400 flex items-center justify-center">
-                  <LogIn className="w-4 h-4" />
-                </div>
+                <span className="p-1.5 rounded-lg bg-amber-500/20 text-amber-400">
+                  <WifiOff className="w-4 h-4" />
+                </span>
               )}
               <div>
-                <div className="text-xs font-bold text-white flex items-center gap-2">
-                  <span>
-                    {googleUser
-                      ? `Connected: ${googleUser.email || googleUser.displayName}`
-                      : 'Google Account: Not Connected'}
-                  </span>
-                  {googleUser && <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />}
+                <div className="font-bold text-white">
+                  {isOnline ? 'Online — Direct CSV Link Active' : 'Offline — Using Local Database'}
                 </div>
                 <div className="text-[11px] text-slate-400">
-                  {googleUser
-                    ? 'Authorized for Google Sheets live read & update'
-                    : 'Sign in with your Google account to grant Google Sheets API access'}
+                  Last synced: {formattedLastSync} • {items.length.toLocaleString()} total products
                 </div>
               </div>
             </div>
 
-            <div>
-              {googleUser ? (
+            <label className="flex items-center gap-2 text-xs text-slate-300 font-semibold cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={autoSyncEnabled}
+                onChange={(e) => setAutoSyncEnabled(e.target.checked)}
+                className="rounded border-slate-600 bg-slate-900 text-indigo-500 focus:ring-indigo-500"
+              />
+              <span>Auto-sync on open</span>
+            </label>
+          </div>
+
+          {/* Primary Method: Direct Published / Share Link Sync */}
+          <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-br from-indigo-950/60 via-slate-800/90 to-slate-800/90 border border-indigo-500/40 space-y-3.5 shadow-md">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <h3 className="text-sm font-extrabold text-white flex items-center gap-2">
+                  <Link2 className="w-4 h-4 text-indigo-400" />
+                  <span>Direct Google Sheet Link</span>
+                  <span className="text-[10px] bg-emerald-600 text-white px-2 py-0.5 rounded-full font-bold">
+                    Connected
+                  </span>
+                </h3>
+                <p className="text-xs text-slate-300 mt-1">
+                  Uses your published CSV link or public Google Sheet share URL directly:
+                </p>
+              </div>
+              {sheetUrlInput !== DEFAULT_PUBLISHED_SHEET_URL && (
                 <button
-                  onClick={handleGoogleLogout}
-                  className="px-3 py-1.5 rounded-xl bg-slate-700 hover:bg-slate-600 text-slate-300 hover:text-white text-xs font-semibold flex items-center gap-1.5 transition-colors"
+                  type="button"
+                  onClick={() => setSheetUrlInput(DEFAULT_PUBLISHED_SHEET_URL)}
+                  className="text-[11px] text-indigo-300 hover:text-indigo-200 font-semibold shrink-0"
                 >
-                  <LogOut className="w-3.5 h-3.5" />
-                  <span>Sign Out</span>
-                </button>
-              ) : (
-                /* Official GSI Style Button */
-                <button
-                  onClick={handleGoogleLogin}
-                  className="px-4 py-2 rounded-xl bg-white hover:bg-slate-100 text-slate-900 text-xs font-bold flex items-center gap-2 shadow-sm transition-all"
-                >
-                  <svg className="w-4 h-4" viewBox="0 0 48 48">
-                    <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" />
-                    <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z" />
-                    <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z" />
-                    <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z" />
-                  </svg>
-                  <span>Sign in with Google</span>
+                  Use Default Link
                 </button>
               )}
             </div>
-          </div>
 
-          {/* Primary Method: Google Sheets Live Sync */}
-          <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-br from-indigo-950/60 via-slate-800/90 to-slate-800/90 border border-indigo-500/40 space-y-3.5 shadow-md">
-            <div>
-              <div className="flex items-center justify-between">
-                <h3 className="text-sm font-extrabold text-white flex items-center gap-2">
-                  <Link2 className="w-4 h-4 text-indigo-400" />
-                  <span>Connect Google Spreadsheet</span>
-                  <span className="text-[10px] bg-indigo-600 text-white px-2 py-0.5 rounded-full font-bold">
-                    Direct API
-                  </span>
-                </h3>
-              </div>
-              <p className="text-xs text-slate-300 mt-1">
-                Paste your Google Sheet link or ID below to load all 3,500+ articles:
-              </p>
-            </div>
-
-            <form onSubmit={handleGoogleSync} className="flex flex-col sm:flex-row gap-2">
+            <form onSubmit={(e) => handleDirectSync(e, true)} className="space-y-2.5">
               <input
                 type="text"
-                value={googleSheetUrl}
-                onChange={(e) => setGoogleSheetUrl(e.target.value)}
-                placeholder="https://docs.google.com/spreadsheets/d/1CALrK7itJNNGiMapwCM.../edit"
-                className="flex-1 bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs font-mono text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 shadow-inner"
+                value={sheetUrlInput}
+                onChange={(e) => setSheetUrlInput(e.target.value)}
+                placeholder="https://docs.google.com/spreadsheets/d/e/.../pub?output=csv"
+                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs font-mono text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 shadow-inner"
               />
-              <button
-                type="submit"
-                disabled={isSyncing || isLoading}
-                className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white text-xs font-bold flex items-center justify-center gap-2 shrink-0 transition-all shadow-md shadow-indigo-600/30"
-              >
-                {isSyncing ? (
-                  <>
-                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                    <span>Syncing...</span>
-                  </>
-                ) : (
-                  <>
-                    <RefreshCw className="w-3.5 h-3.5" />
-                    <span>Sync & Load All Items</span>
-                  </>
-                )}
-              </button>
-            </form>
-
-            {/* Sheet Tabs Selector if multiple tabs detected */}
-            {availableTabs.length > 1 && (
-              <div className="pt-2 border-t border-slate-700/60 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                <span className="text-xs text-slate-300 font-medium flex items-center gap-1.5">
-                  <Layers className="w-3.5 h-3.5 text-indigo-400" />
-                  Sheet Tab:
-                </span>
-                <div className="flex flex-wrap items-center gap-1.5">
-                  {availableTabs.map((tab) => (
-                    <button
-                      key={tab.sheetId}
-                      type="button"
-                      onClick={() => {
-                        setSelectedTab(tab.title);
-                        handleGoogleSync(undefined, tab.title);
-                      }}
-                      className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all ${
-                        selectedTab === tab.title
-                          ? 'bg-indigo-600 text-white shadow-xs'
-                          : 'bg-slate-700/70 text-slate-300 hover:bg-slate-700 hover:text-white'
-                      }`}
-                    >
-                      {tab.title} {tab.rowCount > 0 ? `(${tab.rowCount.toLocaleString()} rows)` : ''}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {connectedSheetId && (
-              <div className="pt-2 flex flex-wrap items-center justify-between gap-2 text-xs border-t border-slate-700/60 text-slate-300">
-                <span className="flex items-center gap-1.5 text-emerald-400 font-semibold">
-                  <Check className="w-3.5 h-3.5" />
-                  Connected: {connectedSheetTitle || connectedSheetId.slice(0, 16)}...
-                </span>
-
+              <div className="flex flex-wrap items-center gap-2">
                 <button
-                  type="button"
-                  onClick={handlePushBack}
-                  disabled={isPushing}
-                  className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white text-xs font-bold flex items-center gap-1.5 transition-colors shadow-xs"
+                  type="submit"
+                  disabled={isSyncing || isLoading || !isOnline}
+                  className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white text-xs font-bold flex items-center justify-center gap-2 transition-all shadow-md shadow-indigo-600/30"
                 >
-                  <Send className="w-3.5 h-3.5" />
-                  <span>{isPushing ? 'Writing changes...' : 'Push Updates to Google Sheet'}</span>
+                  <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
+                  <span>{isSyncing ? 'Syncing...' : 'Sync Now (Keep Local Edits)'}</span>
                 </button>
+
+                {modifiedCount > 0 && (
+                  <button
+                    type="button"
+                    disabled={isSyncing || isLoading || !isOnline}
+                    onClick={() => {
+                      if (
+                        window.confirm(
+                          `Overwrite ${modifiedCount} locally edited item(s) with the latest values from your Google Sheet?`
+                        )
+                      ) {
+                        handleDirectSync(undefined, false);
+                      }
+                    }}
+                    className="px-3.5 py-2.5 rounded-xl bg-slate-700 hover:bg-slate-600 disabled:opacity-40 text-slate-200 text-xs font-semibold transition-all"
+                  >
+                    Force Pull All from Sheet
+                  </button>
+                )}
               </div>
-            )}
+            </form>
           </div>
 
           {importStatus && (
@@ -324,59 +269,66 @@ export const SyncModal: React.FC<SyncModalProps> = ({ isOpen, onClose }) => {
                   : 'bg-emerald-950/80 text-emerald-300 border border-emerald-800'
               }`}
             >
-              {isError ? <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" /> : <Check className="w-4 h-4 shrink-0 mt-0.5" />}
+              {isError ? (
+                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+              ) : (
+                <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" />
+              )}
               <span className="leading-relaxed">{importStatus}</span>
             </div>
           )}
 
-          {/* Backup Method 2: Direct CSV File Upload (100% Offline Guaranteed) */}
-          <div className="p-4 rounded-2xl bg-slate-800/90 border border-slate-700 space-y-3 shadow-xs">
-            <div>
-              <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                <Upload className="w-4 h-4 text-sky-400" />
-                <span>Backup Method: Upload Google Sheet .CSV File</span>
-              </h3>
-              <p className="text-xs text-slate-400 mt-1">
-                In your Google Sheet, click <strong>File → Download → Comma Separated Values (.csv)</strong> and upload it here:
-              </p>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-3 pt-1">
-              <label className="cursor-pointer px-4 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold flex items-center gap-2 transition-colors shadow-xs">
-                <Upload className="w-4 h-4" />
-                <span>Upload Downloaded CSV File</span>
-                <input
-                  type="file"
-                  accept=".csv,.txt"
-                  onChange={handleFileUpload}
-                  className="hidden"
-                />
-              </label>
-
-              <span className="text-xs text-slate-400">Instantly imports all 3,500+ items directly into local database</span>
-            </div>
-          </div>
-
-          {/* Copy All Data to Clipboard */}
+          {/* Export / Copy Edits Back to Master Sheet */}
           <div className="p-4 rounded-2xl bg-slate-800/80 border border-slate-700 space-y-3">
-            <h3 className="text-sm font-bold text-white flex items-center gap-2">
-              <Copy className="w-4 h-4 text-indigo-400" />
-              <span>Copy Data to Paste in Google Sheet (Ctrl+V)</span>
-            </h3>
-            <div className="flex flex-wrap items-center gap-3 pt-1">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                <Copy className="w-4 h-4 text-indigo-400" />
+                <span>Update Master Google Sheet (Copy / Export)</span>
+              </h3>
+              {modifiedCount > 0 && (
+                <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                  {modifiedCount} locally edited
+                </span>
+              )}
+            </div>
+            <p className="text-xs text-slate-400">
+              Published CSV links are read-only from Google. Copy your updated rows here and paste (`Ctrl+V`) into cell <code className="text-slate-200">A1</code> of your sheet:
+            </p>
+            <div className="flex flex-wrap items-center gap-2.5 pt-1">
+              {modifiedCount > 0 && (
+                <button
+                  onClick={handleCopyModified}
+                  className="px-4 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold flex items-center gap-2 transition-all shadow-xs"
+                >
+                  {copiedModified ? (
+                    <>
+                      <Check className="w-4 h-4" />
+                      <span>Copied {modifiedCount} Modified Rows!</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-4 h-4" />
+                      <span>Copy {modifiedCount} Modified Rows</span>
+                    </>
+                  )}
+                </button>
+              )}
+
               <button
-                onClick={handleCopy}
+                onClick={handleCopyAll}
                 className="px-4 py-2.5 rounded-xl bg-slate-700 hover:bg-slate-600 text-white text-xs font-bold flex items-center gap-2 transition-all border border-slate-600 shadow-xs"
               >
                 {copied ? (
                   <>
                     <Check className="w-4 h-4 text-emerald-400" />
-                    <span className="text-emerald-400 font-bold">Copied All {items.length.toLocaleString()} Rows!</span>
+                    <span className="text-emerald-400 font-bold">
+                      Copied All {items.length.toLocaleString()} Rows!
+                    </span>
                   </>
                 ) : (
                   <>
                     <Copy className="w-4 h-4" />
-                    <span>Copy All Rows (TSV format)</span>
+                    <span>Copy All {items.length.toLocaleString()} Rows (TSV)</span>
                   </>
                 )}
               </button>
@@ -386,14 +338,40 @@ export const SyncModal: React.FC<SyncModalProps> = ({ isOpen, onClose }) => {
                 className="px-4 py-2.5 rounded-xl bg-slate-700 hover:bg-slate-600 text-slate-200 text-xs font-bold flex items-center gap-2 border border-slate-600 shadow-xs"
               >
                 <Download className="w-4 h-4" />
-                <span>Download .CSV Export</span>
+                <span>Download .CSV</span>
               </button>
             </div>
           </div>
 
+          {/* Offline Backup: Direct CSV File Upload */}
+          <div className="p-4 rounded-2xl bg-slate-800/90 border border-slate-700 space-y-3 shadow-xs">
+            <div>
+              <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                <Upload className="w-4 h-4 text-sky-400" />
+                <span>Offline Backup: Upload .CSV File</span>
+              </h3>
+              <p className="text-xs text-slate-400 mt-1">
+                Import a downloaded <strong>.csv</strong> file directly anytime, even without internet access:
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3 pt-1">
+              <label className="cursor-pointer px-4 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold flex items-center gap-2 transition-colors shadow-xs">
+                <Upload className="w-4 h-4" />
+                <span>Upload CSV File</span>
+                <input
+                  type="file"
+                  accept=".csv,.txt"
+                  onChange={handleFileUpload}
+                  className="hidden"
+                />
+              </label>
+            </div>
+          </div>
+
           {/* Reset to Sample */}
-          <div className="flex items-center justify-between pt-2 text-xs">
-            <span className="text-slate-400 font-medium">Need to restore seed sample records?</span>
+          <div className="flex items-center justify-between pt-1 text-xs">
+            <span className="text-slate-400 font-medium">Need to restore initial sample records?</span>
             <button
               onClick={() => {
                 if (window.confirm('Reset inventory database to initial seed sample?')) {

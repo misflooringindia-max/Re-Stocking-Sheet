@@ -1,7 +1,7 @@
 export interface StockHistoryEntry {
   id: string;
   timestamp: string; // ISO string
-  field: 'STOCK' | 'Simplified' | 'MRP' | 'RESTOCK';
+  field: 'STOCK' | 'Simplified' | 'MRP' | 'RESTOCK' | 'SYNC';
   oldValue: string | number;
   newValue: string | number;
   changeNote?: string;
@@ -23,6 +23,7 @@ export interface InventoryItem {
   resolvedImageUrl: string;
   history: StockHistoryEntry[]; // Past 3 to 5 updates
   updatedAt: string;
+  locallyModified?: boolean;
 }
 
 export type StockStatus = 'all' | 'in_stock' | 'low_stock' | 'out_of_stock' | 'reorder';

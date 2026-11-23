@@ -1,18 +1,26 @@
-import React, { createContext, useContext, useState, useEffect, useMemo, useRef } from 'react';
-import { InventoryItem, StockHistoryEntry, StockStatus, FilterOptions } from '../types/inventory';
-import { parseStockCsv, exportToCsv, exportToTsv, convertGoogleSheetUrlToCsv } from '../utils/csvHelper';
-import { saveItemsToDb, loadItemsFromDb, clearDb } from '../utils/db';
-import { initAuth, googleSignIn, logoutGoogle, getAccessToken, getCurrentUser } from '../services/googleAuth';
+import React, { createContext, useContext, useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { InventoryItem, StockHistoryEntry, FilterOptions } from '../types/inventory';
 import {
-  extractSpreadsheetId,
-  extractGid,
-  fetchSpreadsheetValues,
-  updateSpreadsheetFromInventory,
-  fetchSpreadsheetMetadata,
-  SheetTabInfo
-} from '../services/googleSheets';
-import { User } from 'firebase/auth';
+  DEFAULT_PUBLISHED_SHEET_URL,
+  parseStockCsv,
+  exportToCsv,
+  exportToTsv,
+  convertGoogleSheetUrlToCsv,
+} from '../utils/csvHelper';
+import { saveItemsToDb, loadItemsFromDb } from '../utils/db';
 import initialCsvRaw from '../data/initialData.csv?raw';
+
+interface SyncOptions {
+  preserveLocalEdits?: boolean;
+  silent?: boolean;
+}
+
+interface SyncResult {
+  success: boolean;
+  count: number;
+  changedCount?: number;
+  error?: string;
+}
 
 interface InventoryContextType {
   items: InventoryItem[];
@@ -25,18 +33,16 @@ interface InventoryContextType {
   quickAdjustStock: (id: string, delta: number) => void;
   batchUpdateStock: (updates: { id: string; stock: number; note?: string }[]) => void;
   importCsvData: (csvContent: string) => { success: boolean; count: number; error?: string };
-  importFromGoogleSheetUrl: (sheetUrl: string) => Promise<{ success: boolean; count: number; error?: string }>;
-  connectAndSyncWithGoogleAccount: (sheetUrlOrId: string, specificTabTitle?: string) => Promise<{ success: boolean; count: number; error?: string }>;
-  pushChangesToGoogleSheet: () => Promise<{ success: boolean; count: number; error?: string }>;
-  googleUser: User | null;
-  googleToken: string | null;
-  handleGoogleLogin: () => Promise<boolean>;
-  handleGoogleLogout: () => Promise<void>;
-  connectedSheetId: string | null;
-  connectedSheetTitle: string | null;
-  availableTabs: SheetTabInfo[];
-  selectedTab: string | null;
-  setSelectedTab: (tab: string) => void;
+  syncFromLiveSheet: (sheetUrl?: string, options?: SyncOptions) => Promise<SyncResult>;
+  connectedSheetUrl: string;
+  setConnectedSheetUrl: (url: string) => void;
+  autoSyncEnabled: boolean;
+  setAutoSyncEnabled: (enabled: boolean) => void;
+  isSyncing: boolean;
+  syncError: string | null;
+  modifiedCount: number;
+  copyModifiedTsvToClipboard: () => Promise<boolean>;
+  clearModifiedFlags: () => void;
   resetToDefault: () => void;
   exportCsv: () => void;
   copyTsvToClipboard: () => Promise<boolean>;
@@ -59,31 +65,166 @@ interface InventoryContextType {
 }
 
 const DEFAULT_THRESHOLD = 15;
+const SHEET_URL_STORAGE_KEY = 'stocksync_published_sheet_url';
+const AUTO_SYNC_STORAGE_KEY = 'stocksync_auto_sync_enabled';
+const LAST_SYNC_TIME_KEY = 'stocksync_last_live_sync_time';
 
 const InventoryContext = createContext<InventoryContextType | null>(null);
 
-export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [items, setItems] = useState<InventoryItem[]>(() => {
-    return parseStockCsv(initialCsvRaw);
+async function fetchSheetCsvText(rawSheetUrl: string): Promise<string> {
+  const csvUrl = convertGoogleSheetUrlToCsv(rawSheetUrl) || rawSheetUrl.trim();
+  if (!csvUrl) {
+    throw new Error('Please enter a valid Google Sheet link.');
+  }
+
+  // Prefer same-origin backend proxy to avoid Google 307 redirect CORS failures
+  let lastError: Error | null = null;
+  try {
+    const proxyEndpoint = `/api/sheet-csv?url=${encodeURIComponent(csvUrl)}&_t=${Date.now()}`;
+    const res = await fetch(proxyEndpoint, { cache: 'no-store' });
+    if (res.ok) {
+      const text = await res.text();
+      if (text && !text.trimStart().startsWith('<!DOCTYPE html') && !text.trimStart().startsWith('<html')) {
+        return text;
+      }
+    } else {
+      const errJson = await res.json().catch(() => null);
+      if (errJson?.error) {
+        lastError = new Error(errJson.error);
+      }
+    }
+  } catch (err: any) {
+    lastError = err;
+  }
+
+  // Fallback: direct browser fetch (works when served statically without backend if CORS allows)
+  try {
+    const res = await fetch(csvUrl, { cache: 'no-store' });
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}`);
+    }
+    const text = await res.text();
+    if (text.trimStart().startsWith('<!DOCTYPE html') || text.trimStart().startsWith('<html')) {
+      throw new Error('Google Sheet is private. Please publish to web as CSV or allow Anyone with the link to view.');
+    }
+    return text;
+  } catch (directErr: any) {
+    throw lastError || directErr || new Error('Could not reach Google Sheet. Check your internet connection and link.');
+  }
+}
+
+function mergeSheetItems(
+  incoming: InventoryItem[],
+  existing: InventoryItem[],
+  preserveLocalEdits: boolean
+): { merged: InventoryItem[]; changedCount: number } {
+  const existingMap = new Map<string, InventoryItem>();
+  existing.forEach((it) => {
+    const key = it.sku.trim().toLowerCase();
+    if (key) existingMap.set(key, it);
   });
+
+  const now = new Date().toISOString();
+  let changedCount = 0;
+
+  const merged = incoming.map((freshItem) => {
+    const key = freshItem.sku.trim().toLowerCase();
+    const prev = existingMap.get(key);
+    if (!prev) {
+      changedCount++;
+      return {
+        ...freshItem,
+        history: [
+          {
+            id: `sync-new-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+            timestamp: now,
+            field: 'SYNC' as const,
+            oldValue: 'New',
+            newValue: freshItem.stock,
+            changeNote: 'Synced from Google Sheet',
+          },
+        ],
+      };
+    }
+
+    // Preserve local edits if requested and item has unsaved local edits
+    if (preserveLocalEdits && prev.locallyModified) {
+      return {
+        ...freshItem,
+        id: prev.id,
+        simplified: prev.simplified,
+        stock: prev.stock,
+        mrp: prev.mrp,
+        history: prev.history,
+        updatedAt: prev.updatedAt,
+        locallyModified: true,
+      };
+    }
+
+    let nextHistory = [...(prev.history || [])];
+    const stockChanged = prev.stock !== freshItem.stock;
+    const nameChanged = prev.simplified !== freshItem.simplified;
+
+    if (stockChanged) {
+      changedCount++;
+      nextHistory = [
+        {
+          id: `sync-stk-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          timestamp: now,
+          field: 'SYNC' as const,
+          oldValue: prev.stock,
+          newValue: freshItem.stock,
+          changeNote: 'Updated from live Google Sheet',
+        },
+        ...nextHistory,
+      ].slice(0, 5);
+    } else if (nameChanged) {
+      changedCount++;
+      nextHistory = [
+        {
+          id: `sync-name-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          timestamp: now,
+          field: 'SYNC' as const,
+          oldValue: prev.simplified,
+          newValue: freshItem.simplified,
+          changeNote: 'Name updated from live Google Sheet',
+        },
+        ...nextHistory,
+      ].slice(0, 5);
+    }
+
+    return {
+      ...freshItem,
+      id: prev.id,
+      history: nextHistory,
+      updatedAt: stockChanged || nameChanged ? now : prev.updatedAt,
+      locallyModified: false,
+    };
+  });
+
+  return { merged, changedCount };
+}
+
+export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [items, setItems] = useState<InventoryItem[]>(() => parseStockCsv(initialCsvRaw));
+  const itemsRef = useRef<InventoryItem[]>(items);
+  itemsRef.current = items;
 
   const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [isSyncing, setIsSyncing] = useState<boolean>(false);
+  const [syncError, setSyncError] = useState<string | null>(null);
   const [loadingMessage, setLoadingMessage] = useState<string>('Loading database...');
   const [isOnline, setIsOnline] = useState<boolean>(typeof navigator !== 'undefined' ? navigator.onLine : true);
-  const [lastSyncTime, setLastSyncTime] = useState<string>(new Date().toISOString());
+  const [lastSyncTime, setLastSyncTime] = useState<string>(
+    () => localStorage.getItem(LAST_SYNC_TIME_KEY) || new Date().toISOString()
+  );
 
-  // Google Workspace Auth State
-  const [googleUser, setGoogleUser] = useState<User | null>(null);
-  const [googleToken, setGoogleToken] = useState<string | null>(null);
-  const [connectedSheetId, setConnectedSheetId] = useState<string | null>(() => {
-    return localStorage.getItem('stocksync_connected_sheet_id') || null;
-  });
-  const [connectedSheetTitle, setConnectedSheetTitle] = useState<string | null>(() => {
-    return localStorage.getItem('stocksync_connected_sheet_title') || null;
-  });
-  const [availableTabs, setAvailableTabs] = useState<SheetTabInfo[]>([]);
-  const [selectedTab, setSelectedTab] = useState<string | null>(() => {
-    return localStorage.getItem('stocksync_selected_tab') || null;
+  const [connectedSheetUrl, setConnectedSheetUrlState] = useState<string>(
+    () => localStorage.getItem(SHEET_URL_STORAGE_KEY) || DEFAULT_PUBLISHED_SHEET_URL
+  );
+  const [autoSyncEnabled, setAutoSyncEnabledState] = useState<boolean>(() => {
+    const saved = localStorage.getItem(AUTO_SYNC_STORAGE_KEY);
+    return saved === null ? true : saved === 'true';
   });
 
   const isInitialLoad = useRef(true);
@@ -97,19 +238,15 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     lowStockThreshold: DEFAULT_THRESHOLD,
   });
 
-  // Init Google Auth listener
-  useEffect(() => {
-    const unsub = initAuth(
-      (user, token) => {
-        setGoogleUser(user);
-        setGoogleToken(token);
-      },
-      () => {
-        setGoogleUser(null);
-        setGoogleToken(null);
-      }
-    );
-    return () => unsub();
+  const setConnectedSheetUrl = useCallback((url: string) => {
+    const trimmed = url.trim();
+    setConnectedSheetUrlState(trimmed);
+    localStorage.setItem(SHEET_URL_STORAGE_KEY, trimmed);
+  }, []);
+
+  const setAutoSyncEnabled = useCallback((enabled: boolean) => {
+    setAutoSyncEnabledState(enabled);
+    localStorage.setItem(AUTO_SYNC_STORAGE_KEY, String(enabled));
   }, []);
 
   // Track online/offline status
@@ -126,29 +263,133 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     };
   }, []);
 
-  // Load from IndexedDB on startup
+  // Direct Live Google Sheet CSV Sync (No API/OAuth needed)
+  const syncFromLiveSheet = useCallback(
+    async (sheetUrl?: string, options?: SyncOptions): Promise<SyncResult> => {
+      const targetUrl = (sheetUrl ?? connectedSheetUrl).trim();
+      if (!targetUrl) {
+        return { success: false, count: 0, error: 'Please enter a Google Sheet link.' };
+      }
+
+      const preserveLocalEdits = options?.preserveLocalEdits ?? true;
+      const silent = options?.silent ?? false;
+
+      try {
+        setIsSyncing(true);
+        setSyncError(null);
+        if (!silent) {
+          setIsLoading(true);
+          setLoadingMessage('Syncing live inventory from Google Sheet...');
+        }
+
+        const csvText = await fetchSheetCsvText(targetUrl);
+        const parsed = parseStockCsv(csvText, 'Google Sheet Live Sync');
+
+        if (parsed.length === 0) {
+          throw new Error('No product rows found in the Google Sheet CSV.');
+        }
+
+        const existingItems = itemsRef.current;
+        const isFirstFullLoad = existingItems.length <= 400;
+
+        let finalItems: InventoryItem[];
+        let changedCount = parsed.length;
+
+        if (isFirstFullLoad) {
+          // Preserve any edits made on the initial seed items
+          const { merged } = mergeSheetItems(parsed, existingItems, preserveLocalEdits);
+          finalItems = merged;
+        } else {
+          const res = mergeSheetItems(parsed, existingItems, preserveLocalEdits);
+          finalItems = res.merged;
+          changedCount = res.changedCount;
+        }
+
+        setItems(finalItems);
+        await saveItemsToDb(finalItems);
+
+        if (sheetUrl && sheetUrl.trim() !== connectedSheetUrl) {
+          setConnectedSheetUrl(sheetUrl.trim());
+        }
+
+        const nowIso = new Date().toISOString();
+        setLastSyncTime(nowIso);
+        localStorage.setItem(LAST_SYNC_TIME_KEY, nowIso);
+
+        return {
+          success: true,
+          count: finalItems.length,
+          changedCount,
+        };
+      } catch (err: any) {
+        const msg = err?.message || 'Failed to sync Google Sheet.';
+        setSyncError(msg);
+        return {
+          success: false,
+          count: 0,
+          error: msg,
+        };
+      } finally {
+        setIsSyncing(false);
+        if (!silent) {
+          setIsLoading(false);
+        }
+      }
+    },
+    [connectedSheetUrl, setConnectedSheetUrl]
+  );
+
+  // Load from IndexedDB on startup, then auto-sync with live published Google Sheet if online
   useEffect(() => {
     let isMounted = true;
 
-    async function initDb() {
+    async function initDbAndSync() {
+      let loadedCount = 0;
       try {
         setIsLoading(true);
         setLoadingMessage('Restoring inventory records from offline storage...');
         const stored = await loadItemsFromDb();
         if (isMounted && stored && stored.length > 0) {
           setItems(stored);
+          itemsRef.current = stored;
+          loadedCount = stored.length;
+        } else {
+          loadedCount = itemsRef.current.length;
         }
       } catch (err) {
         console.warn('Failed to load from IndexedDB, using seed data', err);
+        loadedCount = itemsRef.current.length;
       } finally {
         if (isMounted) {
-          setIsLoading(false);
           isInitialLoad.current = false;
         }
       }
+
+      const activeUrl = localStorage.getItem(SHEET_URL_STORAGE_KEY) || DEFAULT_PUBLISHED_SHEET_URL;
+      const shouldAutoSync =
+        typeof navigator !== 'undefined' &&
+        navigator.onLine &&
+        Boolean(activeUrl) &&
+        (autoSyncEnabled || loadedCount <= 400);
+
+      if (shouldAutoSync && isMounted) {
+        // Show loading overlay only when upgrading from initial 365 seed records
+        const silent = loadedCount > 400;
+        if (silent) {
+          setIsLoading(false);
+        }
+        await syncFromLiveSheet(activeUrl, {
+          preserveLocalEdits: true,
+          silent,
+        });
+      }
+
+      if (isMounted) {
+        setIsLoading(false);
+      }
     }
 
-    initDb();
+    initDbAndSync();
 
     return () => {
       isMounted = false;
@@ -163,37 +404,10 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       saveItemsToDb(items).catch((err) => {
         console.error('Error auto-saving items to IndexedDB', err);
       });
-      setLastSyncTime(new Date().toISOString());
-    }, 400);
+    }, 350);
 
     return () => clearTimeout(timer);
   }, [items]);
-
-  // Google Sign In handler
-  const handleGoogleLogin = async (): Promise<boolean> => {
-    try {
-      setIsLoading(true);
-      setLoadingMessage('Signing in with Google Account...');
-      const res = await googleSignIn();
-      if (res) {
-        setGoogleUser(res.user);
-        setGoogleToken(res.accessToken);
-        return true;
-      }
-      return false;
-    } catch (err: any) {
-      console.error('Sign in error', err);
-      return false;
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleGoogleLogout = async () => {
-    await logoutGoogle();
-    setGoogleUser(null);
-    setGoogleToken(null);
-  };
 
   // Extract unique categories and colors
   const categories = useMemo(() => {
@@ -210,6 +424,10 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       if (item.color && item.color.trim()) set.add(item.color.trim());
     });
     return Array.from(set).sort();
+  }, [items]);
+
+  const modifiedCount = useMemo(() => {
+    return items.filter((it) => it.locallyModified).length;
   }, [items]);
 
   // Helper to append history entry keeping max 5 updates
@@ -236,13 +454,18 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
             field: 'STOCK',
             oldValue: item.stock,
             newValue: validStock,
-            changeNote: note || (validStock > item.stock ? `Restocked +${validStock - item.stock}` : `Reduced -${item.stock - validStock}`),
+            changeNote:
+              note ||
+              (validStock > item.stock
+                ? `Restocked +${validStock - item.stock}`
+                : `Reduced -${item.stock - validStock}`),
           });
           return {
             ...item,
             stock: validStock,
             history: updatedHistory,
             updatedAt: new Date().toISOString(),
+            locallyModified: true,
           };
         }
         return item;
@@ -269,6 +492,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
             simplified: trimmed,
             history: updatedHistory,
             updatedAt: new Date().toISOString(),
+            locallyModified: true,
           };
         }
         return item;
@@ -294,6 +518,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
             stock: nextStock,
             history: updatedHistory,
             updatedAt: new Date().toISOString(),
+            locallyModified: true,
           };
         }
         return item;
@@ -320,6 +545,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
             stock: validStock,
             history: updatedHistory,
             updatedAt: new Date().toISOString(),
+            locallyModified: true,
           };
         }
         return item;
@@ -336,6 +562,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
             ...item,
             [field]: value,
             updatedAt: new Date().toISOString(),
+            locallyModified: true,
           };
         }
         return item;
@@ -358,13 +585,16 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     try {
       setIsLoading(true);
       setLoadingMessage('Parsing and importing inventory records...');
-      const parsed = parseStockCsv(csvContent);
+      const parsed = parseStockCsv(csvContent, 'CSV File Import');
       if (parsed.length === 0) {
         setIsLoading(false);
         return { success: false, count: 0, error: 'No valid inventory rows found in provided CSV.' };
       }
       setItems(parsed);
       saveItemsToDb(parsed);
+      const nowIso = new Date().toISOString();
+      setLastSyncTime(nowIso);
+      localStorage.setItem(LAST_SYNC_TIME_KEY, nowIso);
       setIsLoading(false);
       return { success: true, count: parsed.length };
     } catch (err: any) {
@@ -373,137 +603,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     }
   };
 
-  // 8. Connect and sync directly via Google Workspace OAuth API
-  const connectAndSyncWithGoogleAccount = async (
-    sheetUrlOrId: string,
-    specificTabTitle?: string
-  ): Promise<{ success: boolean; count: number; error?: string }> => {
-    try {
-      const sheetId = extractSpreadsheetId(sheetUrlOrId);
-      if (!sheetId) {
-        return { success: false, count: 0, error: 'Invalid Google Sheet link or ID. Please check the URL.' };
-      }
-
-      const gid = extractGid(sheetUrlOrId);
-
-      let currentToken = await getAccessToken();
-      if (!currentToken) {
-        setIsLoading(true);
-        setLoadingMessage('Authorizing Google Sheets API...');
-        try {
-          const authResult = await googleSignIn();
-          if (authResult?.accessToken) {
-            currentToken = authResult.accessToken;
-            setGoogleUser(authResult.user);
-            setGoogleToken(authResult.accessToken);
-          }
-        } catch (authErr: any) {
-          console.warn('Google sign-in cancelled or failed, attempting direct access:', authErr);
-        }
-      }
-
-      setIsLoading(true);
-      setLoadingMessage(`Connecting to Google Sheet...`);
-
-      const tabToUse = specificTabTitle || selectedTab || undefined;
-      const res = await fetchSpreadsheetValues(sheetId, tabToUse, gid || undefined);
-
-      if (res.items.length === 0) {
-        setIsLoading(false);
-        return { success: false, count: 0, error: 'No product rows found in Google Sheet.' };
-      }
-
-      setItems(res.items);
-      await saveItemsToDb(res.items);
-
-      setConnectedSheetId(sheetId);
-      localStorage.setItem('stocksync_connected_sheet_id', sheetId);
-
-      if (res.metadata) {
-        setConnectedSheetTitle(res.metadata.title);
-        localStorage.setItem('stocksync_connected_sheet_title', res.metadata.title);
-        setAvailableTabs(res.metadata.sheets);
-        setSelectedTab(res.usedTab);
-        localStorage.setItem('stocksync_selected_tab', res.usedTab);
-      } else {
-        setSelectedTab(res.usedTab);
-      }
-
-      setIsLoading(false);
-      return { success: true, count: res.items.length };
-    } catch (err: any) {
-      setIsLoading(false);
-      return {
-        success: false,
-        count: 0,
-        error: err?.message || 'Failed to connect to Google Sheet. Check permissions.',
-      };
-    }
-  };
-
-  // 9. Push modifications back to connected Google Sheet with explicit confirmation
-  const pushChangesToGoogleSheet = async (): Promise<{ success: boolean; count: number; error?: string }> => {
-    if (!connectedSheetId) {
-      return { success: false, count: 0, error: 'No Google Sheet connected. Connect a sheet first.' };
-    }
-
-    try {
-      setIsLoading(true);
-      setLoadingMessage('Writing updated inventory records back to Google Sheet...');
-      const targetTab = selectedTab || connectedSheetTitle || undefined;
-      const res = await updateSpreadsheetFromInventory(connectedSheetId, items, targetTab);
-      setIsLoading(false);
-      return { success: true, count: res.updatedRows };
-    } catch (err: any) {
-      setIsLoading(false);
-      return { success: false, count: 0, error: err?.message || 'Failed to write back to Google Sheet.' };
-    }
-  };
-
-  // 10. Direct URL sync fallback (for published web CSV links)
-  const importFromGoogleSheetUrl = async (sheetUrl: string): Promise<{ success: boolean; count: number; error?: string }> => {
-    // If it's a standard Google Docs link, prefer OAuth connect for 100% reliable access
-    const sheetId = extractSpreadsheetId(sheetUrl);
-    if (sheetId) {
-      return connectAndSyncWithGoogleAccount(sheetId);
-    }
-
-    try {
-      setIsLoading(true);
-      setLoadingMessage('Fetching CSV from web...');
-
-      let fetchUrl = sheetUrl.trim();
-      const directCsvUrl = convertGoogleSheetUrlToCsv(fetchUrl);
-      if (directCsvUrl) {
-        fetchUrl = directCsvUrl;
-      }
-
-      const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(fetchUrl)}`;
-      const res = await fetch(proxyUrl);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const text = await res.text();
-
-      const parsed = parseStockCsv(text);
-      if (parsed.length === 0) {
-        setIsLoading(false);
-        return { success: false, count: 0, error: 'Could not parse products from sheet URL.' };
-      }
-
-      setItems(parsed);
-      await saveItemsToDb(parsed);
-      setIsLoading(false);
-      return { success: true, count: parsed.length };
-    } catch (err: any) {
-      setIsLoading(false);
-      return {
-        success: false,
-        count: 0,
-        error: `Could not fetch: ${err?.message || 'Try connecting with Google Account or uploading CSV file directly'}`
-      };
-    }
-  };
-
-  // 11. Export CSV
+  // 8. Export CSV
   const exportCsv = () => {
     const csv = exportToCsv(items);
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
@@ -517,7 +617,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     URL.revokeObjectURL(url);
   };
 
-  // 12. Copy TSV to clipboard
+  // 9. Copy TSV to clipboard
   const copyTsvToClipboard = async (): Promise<boolean> => {
     try {
       const tsv = exportToTsv(items);
@@ -527,6 +627,23 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       console.error('Clipboard copy failed', err);
       return false;
     }
+  };
+
+  const copyModifiedTsvToClipboard = async (): Promise<boolean> => {
+    try {
+      const modified = items.filter((it) => it.locallyModified);
+      if (modified.length === 0) return false;
+      const tsv = exportToTsv(modified);
+      await navigator.clipboard.writeText(tsv);
+      return true;
+    } catch (err) {
+      console.error('Clipboard copy failed', err);
+      return false;
+    }
+  };
+
+  const clearModifiedFlags = () => {
+    setItems((prev) => prev.map((it) => ({ ...it, locallyModified: false })));
   };
 
   // Global history aggregator
@@ -633,18 +750,16 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         quickAdjustStock,
         batchUpdateStock,
         importCsvData,
-        importFromGoogleSheetUrl,
-        connectAndSyncWithGoogleAccount,
-        pushChangesToGoogleSheet,
-        googleUser,
-        googleToken,
-        handleGoogleLogin,
-        handleGoogleLogout,
-        connectedSheetId,
-        connectedSheetTitle,
-        availableTabs,
-        selectedTab,
-        setSelectedTab,
+        syncFromLiveSheet,
+        connectedSheetUrl,
+        setConnectedSheetUrl,
+        autoSyncEnabled,
+        setAutoSyncEnabled,
+        isSyncing,
+        syncError,
+        modifiedCount,
+        copyModifiedTsvToClipboard,
+        clearModifiedFlags,
         resetToDefault,
         exportCsv,
         copyTsvToClipboard,

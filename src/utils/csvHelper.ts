@@ -1,42 +1,143 @@
 import { InventoryItem } from '../types/inventory';
 import { resolveImageUrl } from './imageHelper';
 
+export const DEFAULT_PUBLISHED_SHEET_URL =
+  'https://docs.google.com/spreadsheets/d/e/2PACX-1vT-1JU1iWrr58Z3VMEBRAqTeovKDVUKnaete2bYvhjHJzccdiTyYF_BPGTGFqLkGn1K9YByc6bekdd0/pub?output=csv';
+
 /**
- * Converts a Google Sheet URL into a direct CSV export URL
+ * Converts any Google Sheet share link or published link into a direct CSV export URL.
+ * Supports:
+ * 1) Published CSV links: https://docs.google.com/spreadsheets/d/e/2PACX-.../pub?output=csv
+ * 2) Published HTML links: https://docs.google.com/spreadsheets/d/e/2PACX-.../pubhtml
+ * 3) Standard shared links: https://docs.google.com/spreadsheets/d/{ID}/edit...
  */
 export function convertGoogleSheetUrlToCsv(rawUrl: string): string | null {
   if (!rawUrl || typeof rawUrl !== 'string') return null;
-  const url = rawUrl.trim();
+  const trimmed = rawUrl.trim();
+  if (!trimmed) return null;
 
-  // Match /spreadsheets/d/SHEET_ID
-  const match = url.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
-  if (!match || !match[1]) return null;
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.hostname !== 'docs.google.com' || !parsed.pathname.includes('/spreadsheets/')) {
+      return null;
+    }
 
-  const sheetId = match[1];
+    // Case 1: Published-to-web URL (/spreadsheets/d/e/2PACX-...)
+    if (parsed.pathname.includes('/spreadsheets/d/e/')) {
+      const pubMatch = parsed.pathname.match(/\/spreadsheets\/d\/e\/([a-zA-Z0-9-_]+)/);
+      if (!pubMatch || !pubMatch[1]) return null;
 
-  // Check if gid is present (e.g. #gid=0 or ?gid=123)
-  const gidMatch = url.match(/[#&?]gid=([0-9]+)/);
-  const gid = gidMatch ? gidMatch[1] : '0';
+      const pubId = pubMatch[1];
+      const gid = parsed.searchParams.get('gid');
+      const params = new URLSearchParams();
+      if (gid) params.set('gid', gid);
+      if (parsed.searchParams.get('single')) params.set('single', parsed.searchParams.get('single')!);
+      params.set('output', 'csv');
 
-  return `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=${gid}`;
+      return `https://docs.google.com/spreadsheets/d/e/${pubId}/pub?${params.toString()}`;
+    }
+
+    // Case 2: Standard spreadsheet URL (/spreadsheets/d/{ID}/...)
+    const idMatch = parsed.pathname.match(/\/spreadsheets(?:\/u\/\d+)?\/d\/([a-zA-Z0-9-_]+)/);
+    if (idMatch && idMatch[1]) {
+      const sheetId = idMatch[1];
+      let gid = parsed.searchParams.get('gid');
+      if (!gid && parsed.hash) {
+        const hashMatch = parsed.hash.match(/gid=([0-9]+)/);
+        if (hashMatch) gid = hashMatch[1];
+      }
+      return gid
+        ? `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=${gid}`
+        : `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv`;
+    }
+  } catch {
+    // Not a full URL — check if raw spreadsheet ID was pasted
+    if (/^[a-zA-Z0-9-_]{25,}$/.test(trimmed)) {
+      if (trimmed.startsWith('2PACX-')) {
+        return `https://docs.google.com/spreadsheets/d/e/${trimmed}/pub?output=csv`;
+      }
+      return `https://docs.google.com/spreadsheets/d/${trimmed}/export?format=csv`;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Full RFC 4180 CSV parser supporting quoted commas, escaped quotes, and multiline cells
+ */
+function parseCsvRows(csvText: string): string[][] {
+  const rows: string[][] = [];
+  let currentRow: string[] = [];
+  let currentVal = '';
+  let inQuotes = false;
+
+  for (let i = 0; i < csvText.length; i++) {
+    const char = csvText[i];
+
+    if (inQuotes) {
+      if (char === '"') {
+        if (csvText[i + 1] === '"') {
+          currentVal += '"';
+          i++;
+        } else {
+          inQuotes = false;
+        }
+      } else {
+        currentVal += char;
+      }
+    } else {
+      if (char === '"') {
+        inQuotes = true;
+      } else if (char === ',') {
+        currentRow.push(currentVal);
+        currentVal = '';
+      } else if (char === '\r') {
+        if (csvText[i + 1] === '\n') i++;
+        currentRow.push(currentVal);
+        if (currentRow.some((c) => c.trim() !== '')) {
+          rows.push(currentRow);
+        }
+        currentRow = [];
+        currentVal = '';
+      } else if (char === '\n') {
+        currentRow.push(currentVal);
+        if (currentRow.some((c) => c.trim() !== '')) {
+          rows.push(currentRow);
+        }
+        currentRow = [];
+        currentVal = '';
+      } else {
+        currentVal += char;
+      }
+    }
+  }
+
+  if (currentVal.length > 0 || currentRow.length > 0) {
+    currentRow.push(currentVal);
+    if (currentRow.some((c) => c.trim() !== '')) {
+      rows.push(currentRow);
+    }
+  }
+
+  return rows;
 }
 
 /**
  * Parses raw CSV text into an array of InventoryItems
  * Optimized for large datasets (3,500+ items)
  */
-export function parseStockCsv(csvText: string): InventoryItem[] {
+export function parseStockCsv(csvText: string, note = 'Initial import'): InventoryItem[] {
   if (!csvText || typeof csvText !== 'string') return [];
 
-  // Normalize line breaks
-  const lines = csvText.split(/\r?\n/);
-  if (lines.length === 0) return [];
+  const rows = parseCsvRows(csvText);
+  if (rows.length === 0) return [];
 
   // Find header index
   let headerIdx = -1;
-  for (let i = 0; i < Math.min(10, lines.length); i++) {
-    const l = lines[i].toLowerCase();
-    if (l.includes('sku') || l.includes('simplified') || l.includes('stock')) {
+  for (let i = 0; i < Math.min(10, rows.length); i++) {
+    const joined = rows[i].join(' ').toLowerCase();
+    if (joined.includes('sku') || joined.includes('simplified') || joined.includes('stock')) {
       headerIdx = i;
       break;
     }
@@ -44,7 +145,7 @@ export function parseStockCsv(csvText: string): InventoryItem[] {
 
   if (headerIdx === -1) headerIdx = 0;
 
-  const headerCols = splitCsvLine(lines[headerIdx]).map((h) => h.trim().toLowerCase());
+  const headerCols = rows[headerIdx].map((h) => h.trim().toLowerCase());
 
   // Locate column positions with flexible matching
   const skuIdx = headerCols.findIndex((h) => h.includes('sku'));
@@ -62,11 +163,8 @@ export function parseStockCsv(csvText: string): InventoryItem[] {
   const items: InventoryItem[] = [];
   const now = new Date().toISOString();
 
-  for (let i = headerIdx + 1; i < lines.length; i++) {
-    const rawLine = lines[i];
-    if (!rawLine || !rawLine.trim()) continue;
-
-    const cols = splitCsvLine(rawLine);
+  for (let i = headerIdx + 1; i < rows.length; i++) {
+    const cols = rows[i];
 
     const sku = (cols[skuIdx >= 0 ? skuIdx : 0] || '').trim();
     const simplified = (cols[simplifiedIdx >= 0 ? simplifiedIdx : 1] || '').trim();
@@ -102,11 +200,15 @@ export function parseStockCsv(csvText: string): InventoryItem[] {
       mrpNum = parseFloat(cleanMrp);
     }
 
-    const imageLink = (cols[imageLinkIdx >= 0 ? imageLinkIdx : 10] || '').trim();
+    let imageLink = (cols[imageLinkIdx >= 0 ? imageLinkIdx : 10] || '').trim();
+    if (!imageLink && imageCol && (imageCol.startsWith('http') || imageCol.toUpperCase().includes('=IMAGE'))) {
+      imageLink = imageCol;
+    }
+
     const resolvedImageUrl = resolveImageUrl(imageLink);
 
     items.push({
-      id: `item-${i}-${sku || 'row'}-${Math.random().toString(36).substring(2, 6)}`,
+      id: `item-${i}-${sku || 'row'}`,
       sku: sku || `SKU-${i}`,
       simplified: simplified || sku || `Item ${i}`,
       item: itemCategory,
@@ -126,7 +228,7 @@ export function parseStockCsv(csvText: string): InventoryItem[] {
           field: 'STOCK',
           oldValue: stockNum,
           newValue: stockNum,
-          changeNote: 'Initial import',
+          changeNote: note,
         },
       ],
       updatedAt: now,
@@ -134,35 +236,6 @@ export function parseStockCsv(csvText: string): InventoryItem[] {
   }
 
   return items;
-}
-
-/**
- * Fast RFC 4180 CSV line splitter
- */
-function splitCsvLine(line: string): string[] {
-  const result: string[] = [];
-  let current = '';
-  let inQuotes = false;
-
-  for (let i = 0; i < line.length; i++) {
-    const char = line[i];
-
-    if (char === '"') {
-      if (inQuotes && line[i + 1] === '"') {
-        current += '"';
-        i++;
-      } else {
-        inQuotes = !inQuotes;
-      }
-    } else if (char === ',' && !inQuotes) {
-      result.push(current);
-      current = '';
-    } else {
-      current += char;
-    }
-  }
-  result.push(current);
-  return result;
 }
 
 /**
