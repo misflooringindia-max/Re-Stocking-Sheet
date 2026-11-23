@@ -113,30 +113,87 @@ async function fetchSheetCsvText(rawSheetUrl: string): Promise<string> {
   }
 }
 
+function deduplicateItemIds(list: InventoryItem[]): { items: InventoryItem[]; hadDuplicates: boolean } {
+  const seen = new Set<string>();
+  let hadDuplicates = false;
+  const deduped = list.map((it, idx) => {
+    let candidate = it.id;
+    if (!candidate || seen.has(candidate)) {
+      hadDuplicates = true;
+      candidate = `item-${idx}-${it.sku || 'row'}-${Math.random().toString(36).slice(2, 6)}`;
+      while (seen.has(candidate)) {
+        candidate = `item-${idx}-${Math.random().toString(36).slice(2, 8)}`;
+      }
+    }
+    seen.add(candidate);
+    return candidate === it.id ? it : { ...it, id: candidate };
+  });
+  return { items: deduped, hadDuplicates };
+}
+
 function mergeSheetItems(
   incoming: InventoryItem[],
   existing: InventoryItem[],
   preserveLocalEdits: boolean
 ): { merged: InventoryItem[]; changedCount: number } {
-  const existingMap = new Map<string, InventoryItem>();
+  const buckets = new Map<string, InventoryItem[]>();
   existing.forEach((it) => {
     const key = it.sku.trim().toLowerCase();
-    if (key) existingMap.set(key, it);
+    if (!key) return;
+    const list = buckets.get(key);
+    if (list) {
+      list.push(it);
+    } else {
+      buckets.set(key, [it]);
+    }
   });
+
+  const usedIds = new Set<string>();
+  const claimUniqueId = (preferredId: string, idx: number, sku: string): string => {
+    let candidate = preferredId;
+    if (!candidate || usedIds.has(candidate)) {
+      candidate = `item-${idx}-${sku || 'row'}`;
+      let suffix = 1;
+      while (usedIds.has(candidate)) {
+        candidate = `item-${idx}-${sku || 'row'}-${suffix++}`;
+      }
+    }
+    usedIds.add(candidate);
+    return candidate;
+  };
 
   const now = new Date().toISOString();
   let changedCount = 0;
 
-  const merged = incoming.map((freshItem) => {
+  const merged = incoming.map((freshItem, idx) => {
     const key = freshItem.sku.trim().toLowerCase();
-    const prev = existingMap.get(key);
+    const bucket = key ? buckets.get(key) : undefined;
+    let prev: InventoryItem | undefined;
+
+    if (bucket && bucket.length > 0) {
+      // Prefer exact match on simplified name / EAN / ASIN when duplicate SKUs exist
+      const exactIdx = bucket.findIndex(
+        (b) =>
+          (freshItem.ean && b.ean === freshItem.ean) ||
+          (freshItem.asin && b.asin === freshItem.asin) ||
+          b.simplified.trim().toLowerCase() === freshItem.simplified.trim().toLowerCase()
+      );
+      if (exactIdx >= 0) {
+        prev = bucket.splice(exactIdx, 1)[0];
+      } else {
+        prev = bucket.shift();
+      }
+    }
+
     if (!prev) {
       changedCount++;
+      const uniqueId = claimUniqueId(freshItem.id, idx, freshItem.sku);
       return {
         ...freshItem,
+        id: uniqueId,
         history: [
           {
-            id: `sync-new-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+            id: `sync-new-${idx}-${Date.now()}`,
             timestamp: now,
             field: 'SYNC' as const,
             oldValue: 'New',
@@ -147,11 +204,13 @@ function mergeSheetItems(
       };
     }
 
+    const uniqueId = claimUniqueId(prev.id, idx, freshItem.sku);
+
     // Preserve local edits if requested and item has unsaved local edits
     if (preserveLocalEdits && prev.locallyModified) {
       return {
         ...freshItem,
-        id: prev.id,
+        id: uniqueId,
         simplified: prev.simplified,
         stock: prev.stock,
         mrp: prev.mrp,
@@ -169,7 +228,7 @@ function mergeSheetItems(
       changedCount++;
       nextHistory = [
         {
-          id: `sync-stk-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          id: `sync-stk-${idx}-${Date.now()}`,
           timestamp: now,
           field: 'SYNC' as const,
           oldValue: prev.stock,
@@ -182,7 +241,7 @@ function mergeSheetItems(
       changedCount++;
       nextHistory = [
         {
-          id: `sync-name-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          id: `sync-name-${idx}-${Date.now()}`,
           timestamp: now,
           field: 'SYNC' as const,
           oldValue: prev.simplified,
@@ -195,7 +254,7 @@ function mergeSheetItems(
 
     return {
       ...freshItem,
-      id: prev.id,
+      id: uniqueId,
       history: nextHistory,
       updatedAt: stockChanged || nameChanged ? now : prev.updatedAt,
       locallyModified: false,
@@ -350,9 +409,13 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         setLoadingMessage('Restoring inventory records from offline storage...');
         const stored = await loadItemsFromDb();
         if (isMounted && stored && stored.length > 0) {
-          setItems(stored);
-          itemsRef.current = stored;
-          loadedCount = stored.length;
+          const { items: cleaned, hadDuplicates } = deduplicateItemIds(stored);
+          setItems(cleaned);
+          itemsRef.current = cleaned;
+          loadedCount = cleaned.length;
+          if (hadDuplicates) {
+            saveItemsToDb(cleaned).catch(() => {});
+          }
         } else {
           loadedCount = itemsRef.current.length;
         }
