@@ -1,0 +1,6 @@
+{
+  "name": "StockSync - Live Inventory & Re-Order Dashboard",
+  "description": "Real-time Google Sheet-synced inventory tracker with offline support, low-stock alerts, instant master editing, image conversion, and update history.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
