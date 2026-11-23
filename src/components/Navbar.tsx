@@ -45,43 +45,39 @@ export const Navbar: React.FC<NavbarProps> = ({
   } = useInventory();
 
   return (
-    <header className="sticky top-0 z-30 bg-slate-900/95 backdrop-blur-md border-b border-slate-800 shadow-sm">
+    <header className="sticky top-0 z-30 bg-[var(--header-bg)] text-[var(--header-text)] border-b border-black/15">
       {/* Top Main Navigation Bar */}
-      <div className="max-w-7xl mx-auto px-3 sm:px-6 py-2.5">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3">
         <div className="flex items-center justify-between gap-3">
-          {/* Brand Logo & Name */}
-          <div className="flex items-center gap-2.5 min-w-max">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-indigo-500 to-indigo-600 flex items-center justify-center shadow-md shadow-indigo-500/20 ring-1 ring-white/10">
+          {/* Brand Logo & Live Sync Status */}
+          <div className="flex items-center gap-3 min-w-max">
+            <div className="w-9 h-9 rounded-lg bg-white/10 border border-white/15 flex items-center justify-center">
               <Boxes className="w-5 h-5 text-white" />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <span className="font-extrabold text-base tracking-tight text-white">StockSync</span>
-                <span className="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                <span className="font-medium text-[15px] text-white tracking-tight">StockSync</span>
+                <span className="text-[11px] font-medium px-1.5 py-0.5 rounded bg-white/10 text-white/90 border border-white/15">
                   Live Sheet
                 </span>
               </div>
-              <div className="flex items-center gap-2 text-[11px] text-slate-400">
-                <span className="flex items-center gap-1">
+              <div className="flex items-center gap-2 text-[12px] text-white/75 mt-0.5">
+                <span className="flex items-center gap-1.5">
                   {isOnline ? (
-                    <span className="flex items-center gap-1 text-emerald-400 font-semibold">
-                      <span
-                        className={`w-2 h-2 rounded-full bg-emerald-500 ${
-                          isSyncing ? 'animate-ping' : 'animate-pulse'
-                        }`}
-                      />
+                    <span className="flex items-center gap-1.5 text-white/90 font-normal">
+                      <span className="w-2 h-2 rounded-full bg-white/80" />
                       {isSyncing ? 'Syncing...' : 'Live Sync'}
                     </span>
                   ) : (
-                    <span className="flex items-center gap-1 text-amber-400 font-semibold">
-                      <WifiOff className="w-3 h-3 text-amber-400" />
-                      Offline Mode
+                    <span className="flex items-center gap-1 text-white/80 font-normal">
+                      <WifiOff className="w-3 h-3 text-white/75" />
+                      Offline mode
                     </span>
                   )}
                 </span>
-                <span className="hidden sm:inline text-slate-600">•</span>
-                <span className="hidden sm:inline text-slate-300 font-medium">
-                  {stats.totalSkus.toLocaleString()} Total Products
+                <span className="hidden sm:inline text-white/35">•</span>
+                <span className="hidden sm:inline text-white/75 font-normal">
+                  {stats.totalSkus.toLocaleString()} products
                 </span>
               </div>
             </div>
@@ -89,18 +85,19 @@ export const Navbar: React.FC<NavbarProps> = ({
 
           {/* Quick Search Input */}
           <div className="flex-1 max-w-md relative hidden md:block">
-            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
             <input
               type="text"
               value={filters.search}
               onChange={(e) => setFilters((p) => ({ ...p, search: e.target.value }))}
-              placeholder="Search by SKU, Article Name, ASIN, EAN, Color, Size..."
-              className="w-full bg-slate-800/90 border border-slate-700/80 rounded-xl pl-9 pr-8 py-2 text-xs font-medium text-white placeholder-slate-400 focus:bg-slate-800 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 transition-all shadow-xs"
+              placeholder="Search by SKU, article name, ASIN, EAN, color, size..."
+              className="w-full bg-[var(--card-bg)] border border-[var(--border)] rounded-lg pl-9 pr-8 py-1.5 text-[13px] font-normal text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-[var(--accent)] transition-colors duration-150"
             />
             {filters.search && (
               <button
                 onClick={() => setFilters((p) => ({ ...p, search: '' }))}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors duration-150"
+                title="Clear search"
               >
                 <X className="w-3.5 h-3.5" />
               </button>
@@ -108,95 +105,105 @@ export const Navbar: React.FC<NavbarProps> = ({
           </div>
 
           {/* Actions & Tools */}
-          <div className="flex items-center gap-1.5 sm:gap-2">
+          <div className="flex items-center gap-2">
             {/* View Mode Toggle */}
-            <div className="flex items-center bg-slate-800 border border-slate-700 rounded-xl p-0.5">
+            <div className="flex items-center bg-[var(--card-bg)] border border-[var(--border)] rounded-lg p-0.5">
               <button
                 onClick={() => setViewMode('grid')}
-                className={`p-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all ${
+                className={`px-2.5 py-1 rounded-[6px] text-[12px] flex items-center gap-1.5 transition-colors duration-150 border ${
                   viewMode === 'grid'
-                    ? 'bg-indigo-600 text-white shadow-xs'
-                    : 'text-slate-300 hover:text-white'
+                    ? 'bg-[var(--accent-soft)] text-[var(--accent)] border-[var(--accent)] font-medium'
+                    : 'bg-transparent text-[var(--text-primary)] border-transparent hover:bg-[var(--table-hover)] font-normal'
                 }`}
-                title="Grid / Card View"
+                title="Grid / Card view"
               >
-                <LayoutGrid className="w-4 h-4" />
-                <span className="hidden lg:inline text-[11px]">Cards</span>
+                <LayoutGrid
+                  className={`w-3.5 h-3.5 ${
+                    viewMode === 'grid' ? 'text-[var(--accent)]' : 'text-[var(--text-muted)]'
+                  }`}
+                />
+                <span className="hidden lg:inline">Cards</span>
               </button>
               <button
                 onClick={() => setViewMode('table')}
-                className={`p-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all ${
+                className={`px-2.5 py-1 rounded-[6px] text-[12px] flex items-center gap-1.5 transition-colors duration-150 border ${
                   viewMode === 'table'
-                    ? 'bg-indigo-600 text-white shadow-xs'
-                    : 'text-slate-300 hover:text-white'
+                    ? 'bg-[var(--accent-soft)] text-[var(--accent)] border-[var(--accent)] font-medium'
+                    : 'bg-transparent text-[var(--text-primary)] border-transparent hover:bg-[var(--table-hover)] font-normal'
                 }`}
-                title="Spreadsheet Table View"
+                title="Spreadsheet table view"
               >
-                <TableIcon className="w-4 h-4" />
-                <span className="hidden lg:inline text-[11px]">Sheet Table</span>
+                <TableIcon
+                  className={`w-3.5 h-3.5 ${
+                    viewMode === 'table' ? 'text-[var(--accent)]' : 'text-[var(--text-muted)]'
+                  }`}
+                />
+                <span className="hidden lg:inline">Sheet Table</span>
               </button>
             </div>
 
             {/* Quick Cycle Count / Audit Mode Button */}
             <button
               onClick={onOpenAudit}
-              className="px-2.5 py-1.5 rounded-xl bg-slate-800 border border-slate-700 hover:border-slate-600 text-slate-200 hover:text-white text-xs font-semibold flex items-center gap-1.5 transition-all shadow-xs"
-              title="Fast Cycle Count / Barcode Audit"
+              className="px-3 py-1.5 rounded-lg bg-[var(--card-bg)] border border-[var(--border)] hover:bg-[var(--table-hover)] text-[var(--text-primary)] text-[13px] font-medium flex items-center gap-1.5 transition-colors duration-150"
+              title="Fast cycle count / barcode audit"
             >
-              <QrCode className="w-3.5 h-3.5 text-indigo-400" />
+              <QrCode className="w-4 h-4 text-[var(--text-muted)]" />
               <span className="hidden sm:inline">Audit Mode</span>
             </button>
 
             {/* History Button */}
             <button
               onClick={onOpenHistory}
-              className="px-2.5 py-1.5 rounded-xl bg-slate-800 border border-slate-700 hover:border-slate-600 text-slate-200 hover:text-white text-xs font-semibold flex items-center gap-1.5 transition-all shadow-xs"
-              title="View History Logs"
+              className="px-3 py-1.5 rounded-lg bg-[var(--card-bg)] border border-[var(--border)] hover:bg-[var(--table-hover)] text-[var(--text-primary)] text-[13px] font-medium flex items-center gap-1.5 transition-colors duration-150"
+              title="View history logs"
             >
-              <History className="w-3.5 h-3.5 text-sky-400" />
+              <History className="w-4 h-4 text-[var(--text-muted)]" />
               <span className="hidden sm:inline">History Log</span>
-            </button>
-
-            {/* Reorder Button */}
-            <button
-              onClick={onOpenReorder}
-              className="relative px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold flex items-center gap-1.5 transition-all shadow-xs"
-              title="Re-Order Management"
-            >
-              <ShoppingCart className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Re-Order</span>
-              {stats.reorderCount > 0 && (
-                <span className="px-1.5 py-0.2 rounded-full bg-white text-amber-900 text-[10px] font-black shadow-xs">
-                  {stats.reorderCount}
-                </span>
-              )}
             </button>
 
             {/* Quick Refresh from Live Sheet */}
             <button
               onClick={() => syncFromLiveSheet()}
               disabled={isSyncing || !isOnline}
-              className="p-1.5 sm:px-2.5 sm:py-1.5 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-emerald-300 text-xs font-bold flex items-center gap-1.5 transition-all disabled:opacity-40"
-              title="Refresh Live Google Sheet Now"
+              className="px-2.5 sm:px-3 py-1.5 rounded-lg bg-[var(--card-bg)] border border-[var(--border)] hover:bg-[var(--table-hover)] text-[var(--text-primary)] text-[13px] font-medium flex items-center gap-1.5 transition-colors duration-150 disabled:opacity-50"
+              title="Refresh live Google Sheet now"
             >
-              <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
+              <RefreshCw
+                className={`w-4 h-4 text-[var(--text-muted)] ${isSyncing ? 'animate-spin' : ''}`}
+              />
               <span className="hidden lg:inline">{isSyncing ? 'Syncing' : 'Refresh'}</span>
             </button>
 
             {/* Google Sheet Link & Export Modal Button */}
             <button
               onClick={onOpenSync}
-              className="relative px-3.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold flex items-center gap-1.5 transition-all shadow-xs shadow-indigo-600/30"
-              title="Direct Sheet Link & Export"
+              className="px-3 py-1.5 rounded-lg bg-[var(--card-bg)] border border-[var(--border)] hover:bg-[var(--table-hover)] text-[var(--text-primary)] text-[13px] font-medium flex items-center gap-1.5 transition-colors duration-150"
+              title="Direct sheet link & export"
             >
-              <FileSpreadsheet className="w-3.5 h-3.5" />
+              <FileSpreadsheet className="w-4 h-4 text-[var(--text-muted)]" />
               <span className="hidden sm:inline">Sheet Sync</span>
               {modifiedCount > 0 && (
                 <span
-                  className="px-1.5 py-0.2 rounded-full bg-white text-indigo-900 text-[10px] font-black shadow-xs"
+                  className="px-1.5 py-0.5 rounded bg-[var(--surface-subtle)] border border-[var(--border)] text-[var(--text-primary)] text-[11px] font-medium leading-none"
                   title={`${modifiedCount} local edits`}
                 >
                   {modifiedCount}
+                </span>
+              )}
+            </button>
+
+            {/* Primary Action: Re-Order Button (ONLY primary amber button) */}
+            <button
+              onClick={onOpenReorder}
+              className="px-3.5 py-1.5 rounded-lg bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white text-[13px] font-medium flex items-center gap-1.5 transition-colors duration-150"
+              title="Re-order management"
+            >
+              <ShoppingCart className="w-4 h-4 text-white" />
+              <span className="hidden sm:inline">Re-Order</span>
+              {stats.reorderCount > 0 && (
+                <span className="px-1.5 py-0.5 rounded bg-white/20 text-white text-[11px] font-medium leading-none">
+                  {stats.reorderCount}
                 </span>
               )}
             </button>
@@ -204,19 +211,19 @@ export const Navbar: React.FC<NavbarProps> = ({
         </div>
 
         {/* Mobile Search Bar */}
-        <div className="mt-2 relative md:hidden">
-          <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+        <div className="mt-2.5 relative md:hidden">
+          <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
           <input
             type="text"
             value={filters.search}
             onChange={(e) => setFilters((p) => ({ ...p, search: e.target.value }))}
             placeholder="Search SKU, article name, color, size, ASIN..."
-            className="w-full bg-slate-800 border border-slate-700 rounded-xl pl-9 pr-8 py-2 text-xs font-medium text-white placeholder-slate-400 focus:outline-none focus:border-indigo-500"
+            className="w-full bg-[var(--card-bg)] border border-[var(--border)] rounded-lg pl-9 pr-8 py-1.5 text-[13px] font-normal text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-[var(--accent)]"
           />
           {filters.search && (
             <button
               onClick={() => setFilters((p) => ({ ...p, search: '' }))}
-              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400"
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-[var(--text-primary)]"
             >
               <X className="w-3.5 h-3.5" />
             </button>
@@ -224,9 +231,9 @@ export const Navbar: React.FC<NavbarProps> = ({
         </div>
 
         {/* Filter Strip: Categories, Colors & Sorting */}
-        <div className="flex items-center gap-2 mt-2 pt-2 border-t border-slate-800 overflow-x-auto no-scrollbar text-xs">
-          <div className="flex items-center gap-1 text-slate-400 text-[11px] font-bold shrink-0">
-            <SlidersHorizontal className="w-3.5 h-3.5 text-slate-400" />
+        <div className="flex items-center gap-2 mt-2.5 pt-2.5 border-t border-white/15 overflow-x-auto no-scrollbar text-[12px]">
+          <div className="flex items-center gap-1.5 text-white/75 text-[12px] font-normal shrink-0">
+            <SlidersHorizontal className="w-3.5 h-3.5 text-white/70" />
             <span>Filter:</span>
           </div>
 
@@ -234,7 +241,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           <select
             value={filters.category}
             onChange={(e) => setFilters((p) => ({ ...p, category: e.target.value }))}
-            className="bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1 text-xs font-semibold text-slate-200 focus:outline-none focus:border-indigo-500 shrink-0"
+            className="bg-[var(--card-bg)] border border-[var(--border)] rounded-lg px-2.5 py-1.5 text-[12px] font-normal text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-[var(--accent)] shrink-0"
           >
             <option value="all">All Articles ({categories.length})</option>
             {categories.map((cat) => (
@@ -248,7 +255,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           <select
             value={filters.color}
             onChange={(e) => setFilters((p) => ({ ...p, color: e.target.value }))}
-            className="bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1 text-xs font-semibold text-slate-200 focus:outline-none focus:border-indigo-500 shrink-0"
+            className="bg-[var(--card-bg)] border border-[var(--border)] rounded-lg px-2.5 py-1.5 text-[12px] font-normal text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-[var(--accent)] shrink-0"
           >
             <option value="all">All Colors ({colors.length})</option>
             {colors.map((c) => (
@@ -262,7 +269,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           <select
             value={filters.sortBy}
             onChange={(e) => setFilters((p) => ({ ...p, sortBy: e.target.value as any }))}
-            className="bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1 text-xs font-semibold text-slate-200 focus:outline-none focus:border-indigo-500 shrink-0"
+            className="bg-[var(--card-bg)] border border-[var(--border)] rounded-lg px-2.5 py-1.5 text-[12px] font-normal text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-[var(--accent)] shrink-0"
           >
             <option value="stock-asc">Stock: Low to High (Alerts first)</option>
             <option value="stock-desc">Stock: High to Low</option>
@@ -286,10 +293,10 @@ export const Navbar: React.FC<NavbarProps> = ({
                 <button
                   key={st}
                   onClick={() => setFilters((p) => ({ ...p, status: st }))}
-                  className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
+                  className={`px-2.5 py-1.5 rounded-lg text-[12px] border transition-colors duration-150 ${
                     active
-                      ? 'bg-indigo-600 text-white shadow-xs'
-                      : 'bg-slate-800 border border-slate-700 text-slate-300 hover:text-white hover:bg-slate-700'
+                      ? 'bg-[var(--accent-soft)] text-[var(--accent)] border-[var(--accent)] font-medium'
+                      : 'bg-[var(--card-bg)] border-[var(--border)] text-[var(--text-primary)] hover:bg-[var(--table-hover)] font-normal'
                   }`}
                 >
                   {labels[st]}

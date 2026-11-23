@@ -11,10 +11,10 @@ import { ReorderModal } from './components/ReorderModal';
 import { SyncModal } from './components/SyncModal';
 import { AuditModeModal } from './components/AuditModeModal';
 import { InventoryItem } from './types/inventory';
-import { 
-  PackageOpen, 
-  RotateCcw, 
-  ShoppingCart, 
+import {
+  PackageOpen,
+  RotateCcw,
+  ShoppingCart,
   Layers,
   Loader2,
 } from 'lucide-react';
@@ -25,7 +25,7 @@ function DashboardContent() {
   const [viewMode, setViewMode] = useState<'grid' | 'table'>('grid');
   const [selectedDetailItem, setSelectedDetailItem] = useState<InventoryItem | null>(null);
   const [selectedHistoryItem, setSelectedHistoryItem] = useState<InventoryItem | null>(null);
-  
+
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [isReorderOpen, setIsReorderOpen] = useState(false);
   const [isSyncOpen, setIsSyncOpen] = useState(false);
@@ -52,14 +52,24 @@ function DashboardContent() {
     setIsHistoryOpen(true);
   };
 
+  const statusLabels: Record<string, string> = {
+    out_of_stock: 'Out of stock',
+    low_stock: 'Low stock',
+    in_stock: 'In stock',
+  };
+
   return (
-    <div className="min-h-screen bg-slate-900 text-slate-100 flex flex-col font-sans selection:bg-indigo-500 selection:text-white relative">
+    <div className="min-h-screen bg-[var(--page-bg)] text-[var(--text-primary)] flex flex-col relative">
       {/* Loading Overlay */}
       {isLoading && (
-        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex flex-col items-center justify-center p-4 text-center">
-          <Loader2 className="w-10 h-10 text-indigo-500 animate-spin mb-3" />
-          <h3 className="text-base font-bold text-white">{loadingMessage}</h3>
-          <p className="text-xs text-slate-400 mt-1">Processing database records in background...</p>
+        <div className="fixed inset-0 z-50 bg-[var(--overlay-bg)] flex flex-col items-center justify-center p-4 text-center">
+          <div className="bg-[var(--card-bg)] border border-[var(--border)] rounded-xl p-6 max-w-sm w-full flex flex-col items-center">
+            <Loader2 className="w-8 h-8 text-[var(--accent)] animate-spin mb-3" />
+            <h3 className="text-[14px] font-medium text-[var(--text-primary)]">{loadingMessage}</h3>
+            <p className="text-[12px] text-[var(--text-muted)] mt-1">
+              Processing database records in background...
+            </p>
+          </div>
         </div>
       )}
 
@@ -74,7 +84,7 @@ function DashboardContent() {
       />
 
       {/* Main Container */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 py-4 space-y-4">
+      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-5 sm:py-6 space-y-5">
         {/* Full Sheet 3500+ Importer Banner */}
         <ImportSheetBanner onOpenSync={() => setIsSyncOpen(true)} />
 
@@ -82,18 +92,25 @@ function DashboardContent() {
         <StatsCards onOpenReorder={() => setIsReorderOpen(true)} />
 
         {/* Results Bar */}
-        <div className="flex items-center justify-between text-xs text-slate-300 px-1 pt-1 font-medium">
+        <div className="flex items-center justify-between text-[12px] text-[var(--text-muted)] px-0.5">
           <div>
-            Showing <strong className="text-white font-bold">{displayedItems.length.toLocaleString()}</strong> of{' '}
-            <strong className="text-white font-bold">{filteredItems.length.toLocaleString()}</strong> articles
+            Showing{' '}
+            <span className="text-[var(--text-primary)] font-medium">
+              {displayedItems.length.toLocaleString()}
+            </span>{' '}
+            of{' '}
+            <span className="text-[var(--text-primary)] font-medium">
+              {filteredItems.length.toLocaleString()}
+            </span>{' '}
+            articles
             {filters.search && (
-              <span className="ml-1 text-indigo-300 font-semibold">
+              <span className="ml-1 text-[var(--accent)] font-medium">
                 matching "{filters.search}"
               </span>
             )}
             {filters.status !== 'all' && (
-              <span className="ml-1 text-amber-300 font-bold uppercase">
-                [{filters.status.replace('_', ' ')}]
+              <span className="ml-1.5 inline-flex items-center px-2 py-0.5 rounded-full bg-[var(--accent-soft)] text-[var(--accent)] border border-[var(--accent)] text-[11px] font-medium">
+                {statusLabels[filters.status] || filters.status.replace('_', ' ')}
               </span>
             )}
           </div>
@@ -110,10 +127,10 @@ function DashboardContent() {
                     status: 'all',
                   }))
                 }
-                className="text-xs text-indigo-400 hover:text-indigo-300 font-bold flex items-center gap-1"
+                className="text-[12px] text-[var(--accent)] hover:text-[var(--accent-hover)] font-medium flex items-center gap-1 transition-colors duration-150"
               >
-                <RotateCcw className="w-3 h-3" />
-                Reset filters
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>Reset filters</span>
               </button>
             )}
           </div>
@@ -121,10 +138,12 @@ function DashboardContent() {
 
         {/* Inventory Items Content */}
         {filteredItems.length === 0 ? (
-          <div className="py-20 text-center space-y-3 bg-slate-800/90 rounded-3xl border border-slate-700 p-8 shadow-xs">
-            <PackageOpen className="w-12 h-12 text-slate-500 mx-auto" />
-            <h3 className="text-base font-extrabold text-white">No articles match your criteria</h3>
-            <p className="text-xs text-slate-400 max-w-sm mx-auto">
+          <div className="py-16 text-center space-y-3 bg-[var(--card-bg)] rounded-xl border border-[var(--border)] p-8">
+            <PackageOpen className="w-10 h-10 text-[var(--text-muted)] mx-auto" />
+            <h3 className="text-[14px] font-medium text-[var(--text-primary)]">
+              No articles match your criteria
+            </h3>
+            <p className="text-[12px] text-[var(--text-muted)] max-w-sm mx-auto">
               Try adjusting your search query, clearing category filters, or switching stock status.
             </p>
             <button
@@ -137,13 +156,13 @@ function DashboardContent() {
                   status: 'all',
                 }))
               }
-              className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow-xs"
+              className="px-4 py-2 rounded-lg bg-[var(--card-bg)] border border-[var(--border)] hover:bg-[var(--table-hover)] text-[var(--text-primary)] text-[12px] font-medium transition-colors duration-150"
             >
-              Clear All Filters
+              Clear all filters
             </button>
           </div>
         ) : viewMode === 'grid' ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
             {displayedItems.map((item) => (
               <ItemCard
                 key={item.id}
@@ -163,20 +182,20 @@ function DashboardContent() {
 
         {/* Load More Button for large catalogue (3,500+ items) */}
         {hasMore && (
-          <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-4 pb-8">
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2 pb-6">
             <button
               onClick={() => setDisplayCount((c) => c + 150)}
-              className="px-6 py-2.5 rounded-2xl bg-slate-800 border border-slate-700 hover:bg-slate-750 hover:border-slate-600 text-white text-xs font-bold transition-all shadow-xs"
+              className="px-4 py-2 rounded-lg bg-[var(--card-bg)] border border-[var(--border)] hover:bg-[var(--table-hover)] text-[var(--text-primary)] text-[13px] font-medium transition-colors duration-150"
             >
-              Load Next 150 Articles ({(filteredItems.length - displayCount).toLocaleString()} remaining)
+              Load next 150 articles ({(filteredItems.length - displayCount).toLocaleString()} remaining)
             </button>
 
             {filteredItems.length - displayCount <= 1000 && (
               <button
                 onClick={() => setDisplayCount(filteredItems.length)}
-                className="px-4 py-2.5 rounded-2xl bg-slate-800/60 border border-slate-700/60 hover:bg-slate-700 text-slate-300 text-xs font-semibold"
+                className="px-4 py-2 rounded-lg bg-[var(--card-bg)] border border-[var(--border)] hover:bg-[var(--table-hover)] text-[var(--text-muted)] hover:text-[var(--text-primary)] text-[13px] font-medium transition-colors duration-150"
               >
-                Show All {filteredItems.length.toLocaleString()} Articles
+                Show all {filteredItems.length.toLocaleString()} articles
               </button>
             )}
           </div>
@@ -184,22 +203,22 @@ function DashboardContent() {
       </main>
 
       {/* Floating Bottom Quick Action on Mobile */}
-      <div className="fixed bottom-3 right-3 sm:hidden z-40 flex items-center gap-2">
+      <div className="fixed bottom-4 right-4 sm:hidden z-40 flex items-center gap-2">
         <button
           onClick={() => setIsAuditOpen(true)}
-          className="p-3 rounded-full bg-indigo-600 text-white shadow-lg shadow-indigo-600/40 border border-white/20"
+          className="p-3 rounded-lg bg-[var(--card-bg)] text-[var(--text-primary)] border border-[var(--border)] transition-colors duration-150"
           title="Rapid Cycle Count"
         >
-          <Layers className="w-5 h-5" />
+          <Layers className="w-5 h-5 text-[var(--text-muted)]" />
         </button>
         {stats.reorderCount > 0 && (
           <button
             onClick={() => setIsReorderOpen(true)}
-            className="p-3 rounded-full bg-amber-600 text-white shadow-lg shadow-amber-600/40 border border-white/20 relative"
-            title="Re-Order Alerts"
+            className="p-3 rounded-lg bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white relative transition-colors duration-150"
+            title="Re-order alerts"
           >
             <ShoppingCart className="w-5 h-5" />
-            <span className="absolute -top-1 -right-1 w-5 h-5 bg-rose-500 text-white text-[10px] font-black rounded-full flex items-center justify-center">
+            <span className="absolute -top-1.5 -right-1.5 min-w-[20px] h-5 px-1 bg-[var(--header-bg)] text-white text-[11px] font-medium rounded-full flex items-center justify-center border border-white">
               {stats.reorderCount}
             </span>
           </button>

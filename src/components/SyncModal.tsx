@@ -135,26 +135,26 @@ export const SyncModal: React.FC<SyncModalProps> = ({ isOpen, onClose }) => {
   })();
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-150">
-      <div className="w-full max-w-2xl bg-slate-900 border border-slate-700/80 rounded-3xl overflow-hidden shadow-2xl flex flex-col max-h-[92vh]">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-[var(--overlay-bg)]">
+      <div className="w-full max-w-2xl bg-[var(--card-bg)] border border-[var(--border)] rounded-xl overflow-hidden flex flex-col max-h-[92vh]">
         {/* Header */}
-        <div className="p-4 sm:p-5 border-b border-slate-700/80 bg-slate-900 flex items-center justify-between">
+        <div className="p-4 sm:p-5 border-b border-[var(--table-divider)] bg-[var(--card-bg)] flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-2xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+            <div className="p-2 rounded-lg bg-[var(--surface-subtle)] text-[var(--text-muted)] border border-[var(--border)]">
               <FileSpreadsheet className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-base font-extrabold text-white flex items-center gap-2">
-                Direct Google Sheet Sync Hub
+              <h2 className="text-[15px] font-medium text-[var(--text-primary)]">
+                Direct Google Sheet sync hub
               </h2>
-              <p className="text-xs text-slate-400">
-                Real-time CSV link sync with offline IndexedDB storage — no sign-in required
+              <p className="text-[12px] text-[var(--text-muted)]">
+                Real-time CSV link sync with offline IndexedDB storage
               </p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+            className="p-1.5 rounded-lg text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--table-hover)] transition-colors duration-150"
           >
             <X className="w-5 h-5" />
           </button>
@@ -163,50 +163,44 @@ export const SyncModal: React.FC<SyncModalProps> = ({ isOpen, onClose }) => {
         {/* Content */}
         <div className="p-4 sm:p-6 overflow-y-auto space-y-5">
           {/* Connection Status Strip */}
-          <div className="p-3.5 rounded-2xl bg-slate-800/90 border border-slate-700 flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-2.5 text-xs">
-              {isOnline ? (
-                <span className="p-1.5 rounded-lg bg-emerald-500/20 text-emerald-400">
-                  <Wifi className="w-4 h-4" />
-                </span>
-              ) : (
-                <span className="p-1.5 rounded-lg bg-amber-500/20 text-amber-400">
-                  <WifiOff className="w-4 h-4" />
-                </span>
-              )}
+          <div className="p-4 rounded-xl bg-[var(--surface-subtle)] border border-[var(--border)] flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5 text-[12px]">
+              <span className="p-1.5 rounded-lg bg-[var(--card-bg)] border border-[var(--border)] text-[var(--text-muted)]">
+                {isOnline ? <Wifi className="w-4 h-4" /> : <WifiOff className="w-4 h-4" />}
+              </span>
               <div>
-                <div className="font-bold text-white">
-                  {isOnline ? 'Online — Direct CSV Link Active' : 'Offline — Using Local Database'}
+                <div className="font-medium text-[var(--text-primary)]">
+                  {isOnline ? 'Online — Direct CSV link active' : 'Offline — Using local database'}
                 </div>
-                <div className="text-[11px] text-slate-400">
+                <div className="text-[12px] text-[var(--text-muted)]">
                   Last synced: {formattedLastSync} • {items.length.toLocaleString()} total products
                 </div>
               </div>
             </div>
 
-            <label className="flex items-center gap-2 text-xs text-slate-300 font-semibold cursor-pointer select-none">
+            <label className="flex items-center gap-2 text-[12px] text-[var(--text-primary)] font-normal cursor-pointer select-none">
               <input
                 type="checkbox"
                 checked={autoSyncEnabled}
                 onChange={(e) => setAutoSyncEnabled(e.target.checked)}
-                className="rounded border-slate-600 bg-slate-900 text-indigo-500 focus:ring-indigo-500"
+                className="rounded border-[var(--border)] text-[var(--accent)] focus:ring-[var(--accent)]"
               />
               <span>Auto-sync on open</span>
             </label>
           </div>
 
           {/* Primary Method: Direct Published / Share Link Sync */}
-          <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-br from-indigo-950/60 via-slate-800/90 to-slate-800/90 border border-indigo-500/40 space-y-3.5 shadow-md">
+          <div className="p-4 rounded-xl bg-[var(--card-bg)] border border-[var(--border)] space-y-3">
             <div className="flex items-center justify-between gap-2">
               <div>
-                <h3 className="text-sm font-extrabold text-white flex items-center gap-2">
-                  <Link2 className="w-4 h-4 text-indigo-400" />
-                  <span>Direct Google Sheet Link</span>
-                  <span className="text-[10px] bg-emerald-600 text-white px-2 py-0.5 rounded-full font-bold">
+                <h3 className="text-[14px] font-medium text-[var(--text-primary)] flex items-center gap-2">
+                  <Link2 className="w-4 h-4 text-[var(--text-muted)]" />
+                  <span>Direct Google Sheet link</span>
+                  <span className="text-[11px] bg-[var(--accent-soft)] text-[var(--accent)] border border-[var(--accent)] px-2 py-0.5 rounded-full font-medium">
                     Connected
                   </span>
                 </h3>
-                <p className="text-xs text-slate-300 mt-1">
+                <p className="text-[12px] text-[var(--text-muted)] mt-1">
                   Uses your published CSV link or public Google Sheet share URL directly:
                 </p>
               </div>
@@ -214,29 +208,29 @@ export const SyncModal: React.FC<SyncModalProps> = ({ isOpen, onClose }) => {
                 <button
                   type="button"
                   onClick={() => setSheetUrlInput(DEFAULT_PUBLISHED_SHEET_URL)}
-                  className="text-[11px] text-indigo-300 hover:text-indigo-200 font-semibold shrink-0"
+                  className="text-[12px] text-[var(--accent)] hover:text-[var(--accent-hover)] font-medium shrink-0 transition-colors duration-150"
                 >
-                  Use Default Link
+                  Use default link
                 </button>
               )}
             </div>
 
-            <form onSubmit={(e) => handleDirectSync(e, true)} className="space-y-2.5">
+            <form onSubmit={(e) => handleDirectSync(e, true)} className="space-y-3">
               <input
                 type="text"
                 value={sheetUrlInput}
                 onChange={(e) => setSheetUrlInput(e.target.value)}
                 placeholder="https://docs.google.com/spreadsheets/d/e/.../pub?output=csv"
-                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs font-mono text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 shadow-inner"
+                className="w-full bg-[var(--card-bg)] border border-[var(--border)] rounded-lg px-3 py-2 text-[12px] font-mono text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-[var(--accent)]"
               />
               <div className="flex flex-wrap items-center gap-2">
                 <button
                   type="submit"
                   disabled={isSyncing || isLoading || !isOnline}
-                  className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white text-xs font-bold flex items-center justify-center gap-2 transition-all shadow-md shadow-indigo-600/30"
+                  className="px-4 py-2 rounded-lg bg-[var(--accent)] hover:bg-[var(--accent-hover)] disabled:opacity-40 text-white text-[13px] font-medium flex items-center justify-center gap-2 transition-colors duration-150"
                 >
-                  <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
-                  <span>{isSyncing ? 'Syncing...' : 'Sync Now (Keep Local Edits)'}</span>
+                  <RefreshCw className={`w-3.5 h-3.5 text-white ${isSyncing ? 'animate-spin' : ''}`} />
+                  <span>{isSyncing ? 'Syncing...' : 'Sync now (keep local edits)'}</span>
                 </button>
 
                 {modifiedCount > 0 && (
@@ -252,9 +246,9 @@ export const SyncModal: React.FC<SyncModalProps> = ({ isOpen, onClose }) => {
                         handleDirectSync(undefined, false);
                       }
                     }}
-                    className="px-3.5 py-2.5 rounded-xl bg-slate-700 hover:bg-slate-600 disabled:opacity-40 text-slate-200 text-xs font-semibold transition-all"
+                    className="px-3.5 py-2 rounded-lg bg-[var(--card-bg)] border border-[var(--border)] hover:bg-[var(--table-hover)] disabled:opacity-40 text-[var(--text-primary)] text-[13px] font-medium transition-colors duration-150"
                   >
-                    Force Pull All from Sheet
+                    Force pull all from sheet
                   </button>
                 )}
               </div>
@@ -262,53 +256,48 @@ export const SyncModal: React.FC<SyncModalProps> = ({ isOpen, onClose }) => {
           </div>
 
           {importStatus && (
-            <div
-              className={`text-xs p-3.5 rounded-xl font-bold flex items-start gap-2.5 ${
-                isError
-                  ? 'bg-rose-950/80 text-rose-300 border border-rose-800'
-                  : 'bg-emerald-950/80 text-emerald-300 border border-emerald-800'
-              }`}
-            >
+            <div className="text-[12px] p-3.5 rounded-xl font-medium flex items-start gap-2.5 bg-[var(--surface-subtle)] text-[var(--text-primary)] border border-[var(--border)]">
               {isError ? (
-                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                <AlertCircle className="w-4 h-4 text-[var(--text-muted)] shrink-0 mt-0.5" />
               ) : (
-                <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" />
+                <CheckCircle2 className="w-4 h-4 text-[var(--text-muted)] shrink-0 mt-0.5" />
               )}
               <span className="leading-relaxed">{importStatus}</span>
             </div>
           )}
 
           {/* Export / Copy Edits Back to Master Sheet */}
-          <div className="p-4 rounded-2xl bg-slate-800/80 border border-slate-700 space-y-3">
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                <Copy className="w-4 h-4 text-indigo-400" />
-                <span>Update Master Google Sheet (Copy / Export)</span>
+          <div className="p-4 rounded-xl bg-[var(--card-bg)] border border-[var(--border)] space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="text-[14px] font-medium text-[var(--text-primary)] flex items-center gap-2">
+                <Copy className="w-4 h-4 text-[var(--text-muted)]" />
+                <span>Update master Google Sheet (copy / export)</span>
               </h3>
               {modifiedCount > 0 && (
-                <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-[var(--accent-soft)] text-[var(--accent)] border border-[var(--accent)]">
                   {modifiedCount} locally edited
                 </span>
               )}
             </div>
-            <p className="text-xs text-slate-400">
-              Published CSV links are read-only from Google. Copy your updated rows here and paste (`Ctrl+V`) into cell <code className="text-slate-200">A1</code> of your sheet:
+            <p className="text-[12px] text-[var(--text-muted)]">
+              Published CSV links are read-only from Google. Copy your updated rows here and paste into cell{' '}
+              <code className="text-[var(--text-primary)] bg-[var(--surface-subtle)] px-1 py-0.5 rounded">A1</code> of your sheet:
             </p>
-            <div className="flex flex-wrap items-center gap-2.5 pt-1">
+            <div className="flex flex-wrap items-center gap-2 pt-1">
               {modifiedCount > 0 && (
                 <button
                   onClick={handleCopyModified}
-                  className="px-4 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold flex items-center gap-2 transition-all shadow-xs"
+                  className="px-3.5 py-2 rounded-lg bg-[var(--card-bg)] border border-[var(--border)] hover:bg-[var(--table-hover)] text-[var(--text-primary)] text-[13px] font-medium flex items-center gap-2 transition-colors duration-150"
                 >
                   {copiedModified ? (
                     <>
-                      <Check className="w-4 h-4" />
-                      <span>Copied {modifiedCount} Modified Rows!</span>
+                      <Check className="w-4 h-4 text-[var(--accent)]" />
+                      <span>Copied {modifiedCount} modified rows</span>
                     </>
                   ) : (
                     <>
-                      <Copy className="w-4 h-4" />
-                      <span>Copy {modifiedCount} Modified Rows</span>
+                      <Copy className="w-4 h-4 text-[var(--text-muted)]" />
+                      <span>Copy {modifiedCount} modified rows</span>
                     </>
                   )}
                 </button>
@@ -316,49 +305,47 @@ export const SyncModal: React.FC<SyncModalProps> = ({ isOpen, onClose }) => {
 
               <button
                 onClick={handleCopyAll}
-                className="px-4 py-2.5 rounded-xl bg-slate-700 hover:bg-slate-600 text-white text-xs font-bold flex items-center gap-2 transition-all border border-slate-600 shadow-xs"
+                className="px-3.5 py-2 rounded-lg bg-[var(--card-bg)] border border-[var(--border)] hover:bg-[var(--table-hover)] text-[var(--text-primary)] text-[13px] font-medium flex items-center gap-2 transition-colors duration-150"
               >
                 {copied ? (
                   <>
-                    <Check className="w-4 h-4 text-emerald-400" />
-                    <span className="text-emerald-400 font-bold">
-                      Copied All {items.length.toLocaleString()} Rows!
-                    </span>
+                    <Check className="w-4 h-4 text-[var(--accent)]" />
+                    <span>Copied all {items.length.toLocaleString()} rows</span>
                   </>
                 ) : (
                   <>
-                    <Copy className="w-4 h-4" />
-                    <span>Copy All {items.length.toLocaleString()} Rows (TSV)</span>
+                    <Copy className="w-4 h-4 text-[var(--text-muted)]" />
+                    <span>Copy all {items.length.toLocaleString()} rows (TSV)</span>
                   </>
                 )}
               </button>
 
               <button
                 onClick={exportCsv}
-                className="px-4 py-2.5 rounded-xl bg-slate-700 hover:bg-slate-600 text-slate-200 text-xs font-bold flex items-center gap-2 border border-slate-600 shadow-xs"
+                className="px-3.5 py-2 rounded-lg bg-[var(--card-bg)] border border-[var(--border)] hover:bg-[var(--table-hover)] text-[var(--text-primary)] text-[13px] font-medium flex items-center gap-2 transition-colors duration-150"
               >
-                <Download className="w-4 h-4" />
+                <Download className="w-4 h-4 text-[var(--text-muted)]" />
                 <span>Download .CSV</span>
               </button>
             </div>
           </div>
 
           {/* Offline Backup: Direct CSV File Upload */}
-          <div className="p-4 rounded-2xl bg-slate-800/90 border border-slate-700 space-y-3 shadow-xs">
+          <div className="p-4 rounded-xl bg-[var(--card-bg)] border border-[var(--border)] space-y-3">
             <div>
-              <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                <Upload className="w-4 h-4 text-sky-400" />
-                <span>Offline Backup: Upload .CSV File</span>
+              <h3 className="text-[14px] font-medium text-[var(--text-primary)] flex items-center gap-2">
+                <Upload className="w-4 h-4 text-[var(--text-muted)]" />
+                <span>Offline backup: upload .CSV file</span>
               </h3>
-              <p className="text-xs text-slate-400 mt-1">
-                Import a downloaded <strong>.csv</strong> file directly anytime, even without internet access:
+              <p className="text-[12px] text-[var(--text-muted)] mt-1">
+                Import a downloaded <span className="font-medium text-[var(--text-primary)]">.csv</span> file directly anytime, even without internet access:
               </p>
             </div>
 
             <div className="flex flex-wrap items-center gap-3 pt-1">
-              <label className="cursor-pointer px-4 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold flex items-center gap-2 transition-colors shadow-xs">
-                <Upload className="w-4 h-4" />
-                <span>Upload CSV File</span>
+              <label className="cursor-pointer px-3.5 py-2 rounded-lg bg-[var(--card-bg)] border border-[var(--border)] hover:bg-[var(--table-hover)] text-[var(--text-primary)] text-[13px] font-medium flex items-center gap-2 transition-colors duration-150">
+                <Upload className="w-4 h-4 text-[var(--text-muted)]" />
+                <span>Upload CSV file</span>
                 <input
                   type="file"
                   accept=".csv,.txt"
@@ -370,8 +357,8 @@ export const SyncModal: React.FC<SyncModalProps> = ({ isOpen, onClose }) => {
           </div>
 
           {/* Reset to Sample */}
-          <div className="flex items-center justify-between pt-1 text-xs">
-            <span className="text-slate-400 font-medium">Need to restore initial sample records?</span>
+          <div className="flex items-center justify-between pt-1 text-[12px]">
+            <span className="text-[var(--text-muted)]">Need to restore initial sample records?</span>
             <button
               onClick={() => {
                 if (window.confirm('Reset inventory database to initial seed sample?')) {
@@ -379,22 +366,26 @@ export const SyncModal: React.FC<SyncModalProps> = ({ isOpen, onClose }) => {
                   setImportStatus('Reset successfully to default sample stock data.');
                 }
               }}
-              className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-rose-950/50 text-slate-300 hover:text-rose-300 border border-slate-700 hover:border-rose-800 transition-colors flex items-center gap-1.5 font-semibold shadow-xs"
+              className="px-3 py-1.5 rounded-lg bg-[var(--card-bg)] hover:bg-[var(--table-hover)] text-[var(--text-primary)] border border-[var(--border)] transition-colors duration-150 flex items-center gap-1.5 font-medium"
             >
-              <RotateCcw className="w-3.5 h-3.5" />
-              <span>Reset to Sample Data</span>
+              <RotateCcw className="w-3.5 h-3.5 text-[var(--text-muted)]" />
+              <span>Reset to sample data</span>
             </button>
           </div>
         </div>
 
         {/* Footer */}
-        <div className="p-4 border-t border-slate-700/80 bg-slate-900 flex items-center justify-between">
-          <div className="text-xs text-slate-400">
-            Database holds <strong className="text-white">{items.length.toLocaleString()}</strong> articles
+        <div className="p-4 border-t border-[var(--table-divider)] bg-[var(--card-bg)] flex items-center justify-between">
+          <div className="text-[12px] text-[var(--text-muted)]">
+            Database holds{' '}
+            <span className="text-[var(--text-primary)] font-medium">
+              {items.length.toLocaleString()}
+            </span>{' '}
+            articles
           </div>
           <button
             onClick={onClose}
-            className="px-5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold"
+            className="px-4 py-2 rounded-lg bg-[var(--card-bg)] border border-[var(--border)] hover:bg-[var(--table-hover)] text-[var(--text-primary)] text-[13px] font-medium transition-colors duration-150"
           >
             Done
           </button>

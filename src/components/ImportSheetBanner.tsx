@@ -78,37 +78,39 @@ export const ImportSheetBanner: React.FC<ImportSheetBannerProps> = ({ onOpenSync
 
   if (hasLoadedFull) {
     return (
-      <div className="bg-slate-800/70 border border-slate-700/70 rounded-xl px-4 py-2 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-300">
+      <div className="bg-[var(--card-bg)] border border-[var(--border)] rounded-xl px-4 py-3 flex flex-wrap items-center justify-between gap-3 text-[12px] text-[var(--text-muted)]">
         <div className="flex items-center gap-2">
-          <Database className="w-4 h-4 text-emerald-400 shrink-0" />
+          <Database className="w-4 h-4 text-[var(--text-muted)] shrink-0" />
           <span>
-            <strong className="text-white font-bold">{stats.totalSkus.toLocaleString()}</strong> articles synced
-            via direct Google Sheet link
+            <span className="text-[var(--text-primary)] font-medium">
+              {stats.totalSkus.toLocaleString()}
+            </span>{' '}
+            articles synced via direct Google Sheet link
             {formattedLastSync && (
-              <span className="text-slate-400 ml-1.5">• Last synced {formattedLastSync}</span>
+              <span className="text-[var(--text-muted)] ml-1.5">• Last synced {formattedLastSync}</span>
             )}
           </span>
         </div>
         <div className="flex items-center gap-3">
           {syncError && (
-            <span className="text-rose-400 font-semibold flex items-center gap-1">
-              <AlertCircle className="w-3.5 h-3.5" />
-              Sync error
+            <span className="text-[var(--text-primary)] font-medium flex items-center gap-1">
+              <AlertCircle className="w-3.5 h-3.5 text-[var(--text-muted)]" />
+              <span>Sync error</span>
             </span>
           )}
           <button
             onClick={handleDirectSync}
             disabled={isSyncing || !isOnline}
-            className="text-emerald-400 hover:text-emerald-300 disabled:opacity-40 font-bold flex items-center gap-1"
+            className="px-2.5 py-1 rounded-lg bg-[var(--card-bg)] border border-[var(--border)] hover:bg-[var(--table-hover)] disabled:opacity-40 text-[var(--text-primary)] font-medium flex items-center gap-1.5 transition-colors duration-150"
           >
-            <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
-            <span>{isSyncing ? 'Syncing...' : 'Refresh Sheet'}</span>
+            <RefreshCw className={`w-3.5 h-3.5 text-[var(--text-muted)] ${isSyncing ? 'animate-spin' : ''}`} />
+            <span>{isSyncing ? 'Syncing...' : 'Refresh sheet'}</span>
           </button>
           <button
             onClick={onOpenSync}
-            className="text-indigo-400 hover:text-indigo-300 font-bold"
+            className="text-[var(--accent)] hover:text-[var(--accent-hover)] font-medium transition-colors duration-150"
           >
-            Manage Link & Export →
+            Manage link &amp; export →
           </button>
         </div>
       </div>
@@ -116,23 +118,24 @@ export const ImportSheetBanner: React.FC<ImportSheetBannerProps> = ({ onOpenSync
   }
 
   return (
-    <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-indigo-950/70 via-slate-850 to-slate-900 border border-indigo-500/30 p-4 sm:p-5 shadow-lg">
+    <div className="rounded-xl bg-[var(--card-bg)] border border-[var(--border)] p-4">
       <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
         <div className="space-y-1 max-w-xl">
           <div className="flex items-center gap-2">
-            <span className="p-1 rounded-lg bg-indigo-500/20 text-indigo-400">
-              <FileSpreadsheet className="w-4 h-4" />
-            </span>
-            <span className="text-xs font-bold uppercase tracking-wider text-indigo-300">
-              Direct Google Sheet Link Sync (3,285+ Items)
+            <FileSpreadsheet className="w-4 h-4 text-[var(--text-muted)]" />
+            <span className="text-[12px] font-medium text-[var(--text-muted)]">
+              Direct Google Sheet link sync (3,285+ items)
             </span>
           </div>
-          <h2 className="text-sm sm:text-base font-extrabold text-white">
+          <h2 className="text-[14px] font-medium text-[var(--text-primary)]">
             Sync your live Google Sheet directly
           </h2>
-          <p className="text-xs text-slate-300 leading-relaxed">
-            Currently showing <strong className="text-amber-300 font-bold">{stats.totalSkus.toLocaleString()}</strong> items.
-            Click <strong>Sync Live Sheet</strong> to pull all articles from your connected direct Google Sheet CSV link.
+          <p className="text-[12px] text-[var(--text-muted)] leading-relaxed">
+            Currently showing{' '}
+            <span className="text-[var(--text-primary)] font-medium">
+              {stats.totalSkus.toLocaleString()}
+            </span>{' '}
+            items. Click Sync live sheet to pull all articles from your connected Google Sheet CSV link.
           </p>
         </div>
 
@@ -140,14 +143,14 @@ export const ImportSheetBanner: React.FC<ImportSheetBannerProps> = ({ onOpenSync
           <button
             onClick={handleDirectSync}
             disabled={isSyncing || !isOnline}
-            className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white text-xs font-bold flex items-center justify-center gap-2 shadow-md shadow-indigo-600/30 transition-all"
+            className="px-3.5 py-2 rounded-lg bg-[var(--accent)] hover:bg-[var(--accent-hover)] disabled:opacity-40 text-white text-[13px] font-medium flex items-center justify-center gap-2 transition-colors duration-150"
           >
-            <RefreshCw className={`w-4 h-4 ${isSyncing ? 'animate-spin' : ''}`} />
-            <span>{isSyncing ? 'Syncing Sheet...' : 'Sync Live Sheet Now'}</span>
+            <RefreshCw className={`w-4 h-4 text-white ${isSyncing ? 'animate-spin' : ''}`} />
+            <span>{isSyncing ? 'Syncing sheet...' : 'Sync live sheet'}</span>
           </button>
 
-          <label className="cursor-pointer px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold flex items-center justify-center gap-2 border border-slate-700 transition-colors">
-            <Upload className="w-4 h-4 text-sky-400" />
+          <label className="cursor-pointer px-3.5 py-2 rounded-lg bg-[var(--card-bg)] hover:bg-[var(--table-hover)] text-[var(--text-primary)] text-[13px] font-medium flex items-center justify-center gap-2 border border-[var(--border)] transition-colors duration-150">
+            <Upload className="w-4 h-4 text-[var(--text-muted)]" />
             <span>Upload CSV</span>
             <input
               type="file"
@@ -159,26 +162,20 @@ export const ImportSheetBanner: React.FC<ImportSheetBannerProps> = ({ onOpenSync
 
           <button
             onClick={onOpenSync}
-            className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold flex items-center justify-center gap-2 border border-slate-700 transition-colors"
+            className="px-3.5 py-2 rounded-lg bg-[var(--card-bg)] hover:bg-[var(--table-hover)] text-[var(--text-primary)] text-[13px] font-medium flex items-center justify-center gap-2 border border-[var(--border)] transition-colors duration-150"
           >
-            <Link2 className="w-4 h-4 text-emerald-400" />
-            <span>Change Link</span>
+            <Link2 className="w-4 h-4 text-[var(--text-muted)]" />
+            <span>Change link</span>
           </button>
         </div>
       </div>
 
       {(status || syncError) && (
-        <div
-          className={`mt-3 p-3 rounded-xl text-xs font-semibold flex items-center gap-2 ${
-            isError || syncError
-              ? 'bg-rose-950/80 text-rose-300 border border-rose-800'
-              : 'bg-emerald-950/80 text-emerald-300 border border-emerald-800'
-          }`}
-        >
+        <div className="mt-3 p-3 rounded-lg text-[12px] font-medium flex items-center gap-2 bg-[var(--surface-subtle)] text-[var(--text-primary)] border border-[var(--border)]">
           {isError || syncError ? (
-            <AlertCircle className="w-4 h-4 shrink-0" />
+            <AlertCircle className="w-4 h-4 text-[var(--text-muted)] shrink-0" />
           ) : (
-            <Check className="w-4 h-4 shrink-0" />
+            <Check className="w-4 h-4 text-[var(--text-muted)] shrink-0" />
           )}
           <span>{status || syncError}</span>
         </div>

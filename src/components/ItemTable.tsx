@@ -72,56 +72,56 @@ export const ItemTable: React.FC<ItemTableProps> = ({
   };
 
   return (
-    <div className="bg-slate-800/90 border border-slate-700/80 rounded-2xl overflow-hidden shadow-sm">
+    <div className="bg-[var(--card-bg)] border border-[var(--border)] rounded-xl overflow-hidden">
       <div className="overflow-x-auto">
-        <table className="w-full text-left text-xs border-collapse">
+        <table className="w-full text-left text-[13px] border-collapse">
           <thead>
-            <tr className="bg-slate-900 border-b border-slate-700 text-[11px] font-bold text-slate-300 uppercase tracking-wider select-none">
-              <th className="py-3 px-3 w-14 text-center">Image</th>
+            <tr className="bg-[var(--table-header-bg)] border-b border-[var(--table-divider)] text-[12px] font-medium text-[var(--text-muted)] select-none">
+              <th className="py-3 px-3 w-14 text-center font-medium">Image</th>
               <th
                 onClick={() => handleSort('sku')}
-                className="py-3 px-3 cursor-pointer hover:text-indigo-300 transition-colors"
+                className="py-3 px-3 cursor-pointer hover:text-[var(--text-primary)] transition-colors duration-150 font-medium"
               >
                 <div className="flex items-center gap-1">
                   <span>Uniware SKU</span>
-                  <ArrowUpDown className="w-3 h-3 text-slate-400" />
+                  <ArrowUpDown className="w-3 h-3 text-[var(--text-muted)]" />
                 </div>
               </th>
               <th
                 onClick={() => handleSort('simplified')}
-                className="py-3 px-3 cursor-pointer hover:text-indigo-300 transition-colors min-w-[220px]"
+                className="py-3 px-3 cursor-pointer hover:text-[var(--text-primary)] transition-colors duration-150 min-w-[220px] font-medium"
               >
                 <div className="flex items-center gap-1">
-                  <span>Simplified Article Name (Edit)</span>
-                  <ArrowUpDown className="w-3 h-3 text-slate-400" />
+                  <span>Simplified article name</span>
+                  <ArrowUpDown className="w-3 h-3 text-[var(--text-muted)]" />
                 </div>
               </th>
-              <th className="py-3 px-2">Item Category</th>
-              <th className="py-3 px-2">Color</th>
-              <th className="py-3 px-2">Size</th>
+              <th className="py-3 px-2.5 font-medium">Category</th>
+              <th className="py-3 px-2.5 font-medium">Color</th>
+              <th className="py-3 px-2.5 font-medium">Size</th>
               <th
                 onClick={() => handleSort('stock')}
-                className="py-3 px-3 cursor-pointer hover:text-indigo-300 transition-colors min-w-[170px]"
+                className="py-3 px-3 cursor-pointer hover:text-[var(--text-primary)] transition-colors duration-150 min-w-[180px] font-medium"
               >
                 <div className="flex items-center gap-1">
                   <span>Stock / Qty</span>
-                  <ArrowUpDown className="w-3 h-3 text-slate-400" />
+                  <ArrowUpDown className="w-3 h-3 text-[var(--text-muted)]" />
                 </div>
               </th>
               <th
                 onClick={() => handleSort('mrp')}
-                className="py-3 px-2 cursor-pointer hover:text-indigo-300 transition-colors"
+                className="py-3 px-2.5 cursor-pointer hover:text-[var(--text-primary)] transition-colors duration-150 font-medium"
               >
                 <div className="flex items-center gap-1">
                   <span>MRP</span>
-                  <ArrowUpDown className="w-3 h-3 text-slate-400" />
+                  <ArrowUpDown className="w-3 h-3 text-[var(--text-muted)]" />
                 </div>
               </th>
-              <th className="py-3 px-3">ASIN / EAN</th>
-              <th className="py-3 px-3 text-right">Audit History</th>
+              <th className="py-3 px-3 font-medium">ASIN / EAN</th>
+              <th className="py-3 px-3 text-right font-medium">History</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-700/60 font-medium text-slate-200">
+          <tbody className="divide-y divide-[var(--table-divider)] text-[var(--text-primary)] font-normal">
             {items.map((item) => {
               const isOutOfStock = item.stock === 0;
               const isLowStock = !isOutOfStock && item.stock <= filters.lowStockThreshold;
@@ -129,16 +129,16 @@ export const ItemTable: React.FC<ItemTableProps> = ({
               const isEditingThisName = editingId === item.id && editingField === 'simplified';
               const isEditingThisStock = editingId === item.id && editingField === 'stock';
 
+              const stockPillClass = isOutOfStock
+                ? 'bg-[var(--status-out-bg)] text-[var(--status-out-text)]'
+                : isLowStock
+                ? 'bg-[var(--status-low-bg)] text-[var(--status-low-text)]'
+                : 'bg-[var(--status-in-bg)] text-[var(--status-in-text)]';
+
               return (
                 <tr
                   key={item.id}
-                  className={`hover:bg-slate-700/40 transition-colors group ${
-                    isOutOfStock
-                      ? 'bg-rose-950/20'
-                      : isLowStock
-                      ? 'bg-amber-950/20'
-                      : ''
-                  }`}
+                  className="hover:bg-[var(--table-hover)] transition-colors duration-150 group"
                 >
                   {/* Image Column */}
                   <td className="py-2.5 px-3 text-center">
@@ -149,7 +149,7 @@ export const ItemTable: React.FC<ItemTableProps> = ({
                         name={item.simplified}
                         itemCategory={item.item}
                         color={item.color}
-                        className="w-10 h-10 rounded-lg shadow-2xs"
+                        className="w-10 h-10 rounded-lg"
                         onClick={() => onOpenDetails(item)}
                       />
                     </div>
@@ -159,7 +159,7 @@ export const ItemTable: React.FC<ItemTableProps> = ({
                   <td className="py-2.5 px-3">
                     <span
                       onClick={() => onOpenDetails(item)}
-                      className="font-mono text-indigo-300 font-bold cursor-pointer hover:text-indigo-200 hover:underline select-all"
+                      className="font-mono text-[12px] text-[var(--text-muted)] cursor-pointer hover:text-[var(--accent)] hover:underline select-all transition-colors duration-150"
                       title={item.sku}
                     >
                       {item.sku}
@@ -177,11 +177,11 @@ export const ItemTable: React.FC<ItemTableProps> = ({
                           onBlur={() => saveEdit(item)}
                           onKeyDown={(e) => e.key === 'Enter' && saveEdit(item)}
                           autoFocus
-                          className="w-full bg-slate-900 border-2 border-indigo-500 rounded px-2 py-1 text-xs font-semibold text-white focus:outline-none shadow-xs"
+                          className="w-full bg-[var(--card-bg)] border border-[var(--border)] rounded-lg px-2 py-1 text-[13px] font-medium text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-[var(--accent)]"
                         />
                         <button
                           onClick={() => saveEdit(item)}
-                          className="p-1 rounded bg-indigo-600 text-white hover:bg-indigo-500 shadow-xs"
+                          className="p-1.5 rounded-lg bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white transition-colors duration-150"
                         >
                           <Check className="w-3.5 h-3.5" />
                         </button>
@@ -189,29 +189,29 @@ export const ItemTable: React.FC<ItemTableProps> = ({
                     ) : (
                       <div
                         onClick={() => startEdit(item.id, 'simplified', item.simplified)}
-                        className="flex items-center justify-between cursor-pointer py-1 px-1.5 -mx-1.5 rounded hover:bg-slate-700/60 transition-all group/edit"
+                        className="flex items-center justify-between cursor-pointer py-1 px-1.5 -mx-1.5 rounded-lg hover:bg-[var(--surface-subtle)] transition-colors duration-150 group/edit"
                         title="Click to edit simplified name"
                       >
-                        <span className="text-white font-bold group-hover/edit:text-indigo-300">
+                        <span className="text-[var(--text-primary)] font-medium group-hover/edit:text-[var(--accent)]">
                           {item.simplified}
                         </span>
-                        <Edit2 className="w-3 h-3 text-slate-400 opacity-0 group-hover/edit:opacity-100 shrink-0 ml-1" />
+                        <Edit2 className="w-3 h-3 text-[var(--text-muted)] opacity-0 group-hover/edit:opacity-100 shrink-0 ml-1" />
                       </div>
                     )}
                   </td>
 
                   {/* Category */}
-                  <td className="py-2.5 px-2">
-                    <span className="px-2 py-0.5 rounded-md bg-slate-750 bg-slate-700 text-[11px] font-semibold text-slate-200 border border-slate-600">
+                  <td className="py-2.5 px-2.5">
+                    <span className="px-2 py-0.5 rounded-full bg-[var(--surface-subtle)] text-[11px] font-medium text-[var(--text-muted)]">
                       {item.item}
                     </span>
                   </td>
 
                   {/* Color */}
-                  <td className="py-2.5 px-2 text-slate-200 font-medium">{item.color}</td>
+                  <td className="py-2.5 px-2.5 text-[var(--text-muted)]">{item.color}</td>
 
                   {/* Size */}
-                  <td className="py-2.5 px-2 text-slate-300 text-[11px]">{item.size}</td>
+                  <td className="py-2.5 px-2.5 text-[var(--text-muted)] text-[12px]">{item.size}</td>
 
                   {/* Stock Quantity Column (Inline Editable + Steppers) */}
                   <td className="py-2.5 px-3">
@@ -226,11 +226,11 @@ export const ItemTable: React.FC<ItemTableProps> = ({
                             onBlur={() => saveEdit(item)}
                             onKeyDown={(e) => e.key === 'Enter' && saveEdit(item)}
                             autoFocus
-                            className="w-16 bg-slate-950 border-2 border-indigo-500 rounded px-1.5 py-0.5 text-xs font-bold text-center text-white focus:outline-none shadow-xs"
+                            className="w-16 bg-[var(--card-bg)] border border-[var(--border)] rounded-lg px-1.5 py-1 text-[12px] font-medium text-center text-[var(--text-primary)] font-mono focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-[var(--accent)]"
                           />
                           <button
                             onClick={() => saveEdit(item)}
-                            className="p-1 rounded bg-indigo-600 text-white hover:bg-indigo-500 shadow-xs"
+                            className="p-1.5 rounded-lg bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white transition-colors duration-150"
                           >
                             <Check className="w-3 h-3" />
                           </button>
@@ -238,40 +238,34 @@ export const ItemTable: React.FC<ItemTableProps> = ({
                       ) : (
                         <button
                           onClick={() => startEdit(item.id, 'stock', item.stock.toString())}
-                          className={`px-2.5 py-1 rounded-lg font-mono font-bold text-xs transition-all border flex items-center gap-1 shadow-2xs hover:ring-2 hover:ring-indigo-500/30 ${
-                            isOutOfStock
-                              ? 'bg-rose-950/70 text-rose-300 border-rose-700'
-                              : isLowStock
-                              ? 'bg-amber-950/70 text-amber-300 border-amber-700'
-                              : 'bg-slate-700/80 text-white border-slate-600'
-                          }`}
+                          className={`px-2.5 py-1 rounded-lg font-mono font-medium text-[12px] transition-colors duration-150 flex items-center gap-1.5 ${stockPillClass}`}
                           title="Click to edit stock level"
                         >
                           <span>{item.stock}</span>
-                          <Edit2 className="w-2.5 h-2.5 opacity-50" />
+                          <Edit2 className="w-2.5 h-2.5 opacity-70" />
                         </button>
                       )}
 
-                      {/* Steppers */}
-                      <div className="flex items-center gap-0.5">
+                      {/* Outlined Steppers */}
+                      <div className="flex items-center gap-1">
                         <button
                           onClick={() => quickAdjustStock(item.id, -1)}
                           disabled={item.stock <= 0}
-                          className="p-1 rounded bg-slate-700 hover:bg-slate-600 disabled:opacity-30 disabled:pointer-events-none text-slate-300"
+                          className="p-1.5 rounded-lg bg-[var(--card-bg)] border border-[var(--border)] hover:bg-[var(--table-hover)] disabled:opacity-35 disabled:pointer-events-none text-[var(--text-primary)] transition-colors duration-150"
                           title="-1 unit"
                         >
                           <Minus className="w-2.5 h-2.5" />
                         </button>
                         <button
                           onClick={() => quickAdjustStock(item.id, 1)}
-                          className="p-1 rounded bg-slate-700 hover:bg-slate-600 text-slate-300"
+                          className="p-1.5 rounded-lg bg-[var(--card-bg)] border border-[var(--border)] hover:bg-[var(--table-hover)] text-[var(--text-primary)] transition-colors duration-150"
                           title="+1 unit"
                         >
                           <Plus className="w-2.5 h-2.5" />
                         </button>
                         <button
                           onClick={() => quickAdjustStock(item.id, 10)}
-                          className="px-1.5 py-0.5 rounded bg-indigo-500/20 hover:bg-indigo-500/30 text-[10px] font-bold text-indigo-300 border border-indigo-500/30"
+                          className="px-2 py-1 rounded-lg bg-[var(--card-bg)] border border-[var(--border)] hover:bg-[var(--table-hover)] text-[11px] font-medium text-[var(--text-primary)] transition-colors duration-150"
                           title="+10 units batch"
                         >
                           +10
@@ -281,19 +275,19 @@ export const ItemTable: React.FC<ItemTableProps> = ({
                   </td>
 
                   {/* MRP */}
-                  <td className="py-2.5 px-2 font-mono font-bold text-white">
+                  <td className="py-2.5 px-2.5 font-mono font-medium text-[var(--text-primary)]">
                     {item.mrp > 0 ? `₹${item.mrp}` : '-'}
                   </td>
 
                   {/* ASIN / EAN */}
                   <td className="py-2.5 px-3">
-                    <div className="text-[11px] font-mono text-slate-400">
+                    <div className="text-[12px] font-mono text-[var(--text-muted)]">
                       {item.asin && item.asin !== 'NO DATA' ? (
-                        <span className="text-slate-300 font-semibold">{item.asin}</span>
+                        <span>{item.asin}</span>
                       ) : item.ean && item.ean !== 'NO DATA' ? (
-                        <span className="text-slate-400">{item.ean}</span>
+                        <span>{item.ean}</span>
                       ) : (
-                        <span className="text-slate-600">-</span>
+                        <span>-</span>
                       )}
                     </div>
                   </td>
@@ -302,10 +296,10 @@ export const ItemTable: React.FC<ItemTableProps> = ({
                   <td className="py-2.5 px-3 text-right">
                     <button
                       onClick={() => onOpenItemHistory(item)}
-                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-200 text-[11px] font-semibold border border-slate-600 transition-colors shadow-2xs"
+                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[var(--card-bg)] hover:bg-[var(--table-hover)] text-[var(--text-muted)] hover:text-[var(--text-primary)] text-[12px] font-normal border border-[var(--border)] transition-colors duration-150"
                       title="Inspect past 3 to 5 updates with date and timestamps"
                     >
-                      <Clock className="w-3 h-3 text-sky-400" />
+                      <Clock className="w-3 h-3 text-[var(--text-muted)]" />
                       <span>{item.history?.length || 1} edits</span>
                     </button>
                   </td>
