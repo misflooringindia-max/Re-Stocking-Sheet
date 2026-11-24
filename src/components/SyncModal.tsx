@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useInventory } from '../context/InventoryContext';
-import { DEFAULT_PUBLISHED_SHEET_URL } from '../utils/csvHelper';
+import { DEFAULT_PUBLISHED_SHEET_URL, DEFAULT_SALES_SHEET_URL } from '../utils/csvHelper';
 import {
   X,
   FileSpreadsheet,
@@ -15,6 +15,7 @@ import {
   Wifi,
   WifiOff,
   CheckCircle2,
+  TrendingUp,
 } from 'lucide-react';
 
 interface SyncModalProps {
@@ -33,6 +34,11 @@ export const SyncModal: React.FC<SyncModalProps> = ({ isOpen, onClose }) => {
     importCsvData,
     syncFromLiveSheet,
     connectedSheetUrl,
+    salesData,
+    connectedSalesUrl,
+    isSyncingSales,
+    salesSyncError,
+    syncSalesSheet,
     autoSyncEnabled,
     setAutoSyncEnabled,
     isSyncing,
@@ -45,12 +51,16 @@ export const SyncModal: React.FC<SyncModalProps> = ({ isOpen, onClose }) => {
   const [copied, setCopied] = useState(false);
   const [copiedModified, setCopiedModified] = useState(false);
   const [sheetUrlInput, setSheetUrlInput] = useState(connectedSheetUrl);
+  const [salesUrlInput, setSalesUrlInput] = useState(connectedSalesUrl);
   const [importStatus, setImportStatus] = useState<string | null>(null);
   const [isError, setIsError] = useState(false);
+  const [salesStatus, setSalesStatus] = useState<string | null>(null);
+  const [isSalesError, setIsSalesError] = useState(false);
 
   useEffect(() => {
     setSheetUrlInput(connectedSheetUrl);
-  }, [connectedSheetUrl, isOpen]);
+    setSalesUrlInput(connectedSalesUrl);
+  }, [connectedSheetUrl, connectedSalesUrl, isOpen]);
 
   if (!isOpen) return null;
 
@@ -95,6 +105,32 @@ export const SyncModal: React.FC<SyncModalProps> = ({ isOpen, onClose }) => {
       setIsError(true);
       setImportStatus(
         res.error || 'Could not load sheet. Make sure the link is published to web as CSV or shared publicly.'
+      );
+    }
+  };
+
+  const handleSalesSync = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const urlToUse = salesUrlInput.trim();
+    if (!urlToUse) {
+      setIsSalesError(true);
+      setSalesStatus('Please paste your Google Sheet sales CSV or share link.');
+      return;
+    }
+
+    setIsSalesError(false);
+    setSalesStatus('Fetching & aggregating sales data by Simplified name...');
+
+    const res = await syncSalesSheet(urlToUse, { forceRefresh: true });
+    if (res.success) {
+      setIsSalesError(false);
+      setSalesStatus(
+        `Synced ${res.rows.toLocaleString()} sales rows across ${res.uniqueSimplified.toLocaleString()} Simplified products.`
+      );
+    } else {
+      setIsSalesError(true);
+      setSalesStatus(
+        res.error || 'Could not load sales sheet. Make sure it is published to web as CSV.'
       );
     }
   };
@@ -173,7 +209,8 @@ export const SyncModal: React.FC<SyncModalProps> = ({ isOpen, onClose }) => {
                   {isOnline ? 'Online — Direct CSV link active' : 'Offline — Using local database'}
                 </div>
                 <div className="text-[12px] text-[var(--text-muted)]">
-                  Last synced: {formattedLastSync} • {items.length.toLocaleString()} total products
+                  Last synced: {formattedLastSync} • {items.length.toLocaleString()} stock SKUs
+                  {salesData && ` • ${salesData.totalRows.toLocaleString()} sales rows`}
                 </div>
               </div>
             </div>
@@ -265,6 +302,68 @@ export const SyncModal: React.FC<SyncModalProps> = ({ isOpen, onClose }) => {
               <span className="leading-relaxed">{importStatus}</span>
             </div>
           )}
+
+          {/* Sales Data Google Sheet Sync */}
+          <div className="p-4 rounded-xl bg-[var(--card-bg)] border border-[var(--border)] space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <h3 className="text-[14px] font-medium text-[var(--text-primary)] flex items-center gap-2">
+                  <TrendingUp className="w-4 h-4 text-[var(--text-muted)]" />
+                  <span>Sales Google Sheet link (per Simplified)</span>
+                  <span className="text-[11px] bg-[var(--accent-soft)] text-[var(--accent)] border border-[var(--accent)] px-2 py-0.5 rounded-full font-medium">
+                    {salesData ? 'Synced' : 'Connecting'}
+                  </span>
+                </h3>
+                <p className="text-[12px] text-[var(--text-muted)] mt-1">
+                  {salesData
+                    ? `${salesData.totalRows.toLocaleString()} order rows (${salesData.minDate} to ${salesData.maxDate}) • ${salesData.uniqueSimplified.toLocaleString()} Simplified articles`
+                    : 'Aggregates historical sales quantities per Simplified article name across 1M, 3M, 6M, 12M, and monthly filters.'}
+                </p>
+              </div>
+              {salesUrlInput !== DEFAULT_SALES_SHEET_URL && (
+                <button
+                  type="button"
+                  onClick={() => setSalesUrlInput(DEFAULT_SALES_SHEET_URL)}
+                  className="text-[12px] text-[var(--accent)] hover:text-[var(--accent-hover)] font-medium shrink-0 transition-colors duration-150"
+                >
+                  Use default link
+                </button>
+              )}
+            </div>
+
+            <form onSubmit={handleSalesSync} className="space-y-3">
+              <input
+                type="text"
+                value={salesUrlInput}
+                onChange={(e) => setSalesUrlInput(e.target.value)}
+                placeholder="https://docs.google.com/spreadsheets/d/e/.../pub?output=csv"
+                className="w-full bg-[var(--card-bg)] border border-[var(--border)] rounded-lg px-3 py-2 text-[12px] font-mono text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-[var(--accent)]"
+              />
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="submit"
+                  disabled={isSyncingSales || !isOnline}
+                  className="px-3.5 py-2 rounded-lg bg-[var(--card-bg)] border border-[var(--border)] hover:bg-[var(--table-hover)] disabled:opacity-40 text-[var(--text-primary)] text-[13px] font-medium flex items-center justify-center gap-2 transition-colors duration-150"
+                >
+                  <RefreshCw
+                    className={`w-3.5 h-3.5 text-[var(--text-muted)] ${isSyncingSales ? 'animate-spin' : ''}`}
+                  />
+                  <span>{isSyncingSales ? 'Syncing sales...' : 'Sync sales sheet'}</span>
+                </button>
+              </div>
+            </form>
+
+            {(salesStatus || salesSyncError) && (
+              <div className="text-[12px] p-3 rounded-lg font-medium flex items-start gap-2 bg-[var(--surface-subtle)] text-[var(--text-primary)] border border-[var(--border)]">
+                {isSalesError || salesSyncError ? (
+                  <AlertCircle className="w-4 h-4 text-[var(--text-muted)] shrink-0 mt-0.5" />
+                ) : (
+                  <CheckCircle2 className="w-4 h-4 text-[var(--text-muted)] shrink-0 mt-0.5" />
+                )}
+                <span className="leading-relaxed">{salesStatus || salesSyncError}</span>
+              </div>
+            )}
+          </div>
 
           {/* Export / Copy Edits Back to Master Sheet */}
           <div className="p-4 rounded-xl bg-[var(--card-bg)] border border-[var(--border)] space-y-3">

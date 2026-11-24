@@ -1,13 +1,26 @@
 import React, { createContext, useContext, useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { InventoryItem, StockHistoryEntry, FilterOptions } from '../types/inventory';
+import {
+  InventoryItem,
+  StockHistoryEntry,
+  FilterOptions,
+  SalesSummaryData,
+  SalesRecord,
+  SalesPeriod,
+} from '../types/inventory';
 import {
   DEFAULT_PUBLISHED_SHEET_URL,
+  DEFAULT_SALES_SHEET_URL,
   parseStockCsv,
   exportToCsv,
   exportToTsv,
   convertGoogleSheetUrlToCsv,
 } from '../utils/csvHelper';
-import { saveItemsToDb, loadItemsFromDb } from '../utils/db';
+import {
+  saveItemsToDb,
+  loadItemsFromDb,
+  saveSalesSummaryToDb,
+  loadSalesSummaryFromDb,
+} from '../utils/db';
 import initialCsvRaw from '../data/initialData.csv?raw';
 
 interface SyncOptions {
@@ -19,6 +32,17 @@ interface SyncResult {
   success: boolean;
   count: number;
   changedCount?: number;
+  error?: string;
+}
+
+interface SalesSyncOptions {
+  forceRefresh?: boolean;
+}
+
+interface SalesSyncResult {
+  success: boolean;
+  rows: number;
+  uniqueSimplified: number;
   error?: string;
 }
 
@@ -36,6 +60,14 @@ interface InventoryContextType {
   syncFromLiveSheet: (sheetUrl?: string, options?: SyncOptions) => Promise<SyncResult>;
   connectedSheetUrl: string;
   setConnectedSheetUrl: (url: string) => void;
+  salesData: SalesSummaryData | null;
+  connectedSalesUrl: string;
+  setConnectedSalesUrl: (url: string) => void;
+  isSyncingSales: boolean;
+  salesSyncError: string | null;
+  syncSalesSheet: (salesUrl?: string, options?: SalesSyncOptions) => Promise<SalesSyncResult>;
+  getItemSales: (simplified: string, period?: SalesPeriod) => number;
+  getItemSalesRecord: (simplified: string) => SalesRecord | null;
   autoSyncEnabled: boolean;
   setAutoSyncEnabled: (enabled: boolean) => void;
   isSyncing: boolean;
@@ -61,11 +93,13 @@ interface InventoryContextType {
     healthyCount: number;
     inventoryValue: number;
     reorderCount: number;
+    filteredSalesTotal: number;
   };
 }
 
 const DEFAULT_THRESHOLD = 15;
 const SHEET_URL_STORAGE_KEY = 'stocksync_published_sheet_url';
+const SALES_URL_STORAGE_KEY = 'stocksync_sales_sheet_url';
 const AUTO_SYNC_STORAGE_KEY = 'stocksync_auto_sync_enabled';
 const LAST_SYNC_TIME_KEY = 'stocksync_last_live_sync_time';
 
@@ -77,7 +111,6 @@ async function fetchSheetCsvText(rawSheetUrl: string): Promise<string> {
     throw new Error('Please enter a valid Google Sheet link.');
   }
 
-  // Prefer same-origin backend proxy to avoid Google 307 redirect CORS failures
   let lastError: Error | null = null;
   try {
     const proxyEndpoint = `/api/sheet-csv?url=${encodeURIComponent(csvUrl)}&_t=${Date.now()}`;
@@ -97,7 +130,6 @@ async function fetchSheetCsvText(rawSheetUrl: string): Promise<string> {
     lastError = err;
   }
 
-  // Fallback: direct browser fetch (works when served statically without backend if CORS allows)
   try {
     const res = await fetch(csvUrl, { cache: 'no-store' });
     if (!res.ok) {
@@ -171,7 +203,6 @@ function mergeSheetItems(
     let prev: InventoryItem | undefined;
 
     if (bucket && bucket.length > 0) {
-      // Prefer exact match on simplified name / EAN / ASIN when duplicate SKUs exist
       const exactIdx = bucket.findIndex(
         (b) =>
           (freshItem.ean && b.ean === freshItem.ean) ||
@@ -206,7 +237,6 @@ function mergeSheetItems(
 
     const uniqueId = claimUniqueId(prev.id, idx, freshItem.sku);
 
-    // Preserve local edits if requested and item has unsaved local edits
     if (preserveLocalEdits && prev.locallyModified) {
       return {
         ...freshItem,
@@ -264,6 +294,20 @@ function mergeSheetItems(
   return { merged, changedCount };
 }
 
+function getSalesValueForRecord(rec: SalesRecord | undefined, period: SalesPeriod): number {
+  if (!rec) return 0;
+  if (period === '1m') return rec.m1;
+  if (period === '3m') return rec.m3;
+  if (period === '6m') return rec.m6;
+  if (period === '12m') return rec.m12;
+  if (period === 'all') return rec.total;
+  if (period.startsWith('month:')) {
+    const ym = period.slice(6);
+    return rec.monthly[ym] || 0;
+  }
+  return rec.m3;
+}
+
 export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [items, setItems] = useState<InventoryItem[]>(() => parseStockCsv(initialCsvRaw));
   const itemsRef = useRef<InventoryItem[]>(items);
@@ -281,6 +325,13 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const [connectedSheetUrl, setConnectedSheetUrlState] = useState<string>(
     () => localStorage.getItem(SHEET_URL_STORAGE_KEY) || DEFAULT_PUBLISHED_SHEET_URL
   );
+  const [connectedSalesUrl, setConnectedSalesUrlState] = useState<string>(
+    () => localStorage.getItem(SALES_URL_STORAGE_KEY) || DEFAULT_SALES_SHEET_URL
+  );
+  const [salesData, setSalesData] = useState<SalesSummaryData | null>(null);
+  const [isSyncingSales, setIsSyncingSales] = useState<boolean>(false);
+  const [salesSyncError, setSalesSyncError] = useState<string | null>(null);
+
   const [autoSyncEnabled, setAutoSyncEnabledState] = useState<boolean>(() => {
     const saved = localStorage.getItem(AUTO_SYNC_STORAGE_KEY);
     return saved === null ? true : saved === 'true';
@@ -295,12 +346,20 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     status: 'all',
     sortBy: 'stock-asc',
     lowStockThreshold: DEFAULT_THRESHOLD,
+    salesPeriod: '3m',
+    salesActivity: 'all',
   });
 
   const setConnectedSheetUrl = useCallback((url: string) => {
     const trimmed = url.trim();
     setConnectedSheetUrlState(trimmed);
     localStorage.setItem(SHEET_URL_STORAGE_KEY, trimmed);
+  }, []);
+
+  const setConnectedSalesUrl = useCallback((url: string) => {
+    const trimmed = url.trim();
+    setConnectedSalesUrlState(trimmed);
+    localStorage.setItem(SALES_URL_STORAGE_KEY, trimmed);
   }, []);
 
   const setAutoSyncEnabled = useCallback((enabled: boolean) => {
@@ -322,7 +381,61 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     };
   }, []);
 
-  // Direct Live Google Sheet CSV Sync (No API/OAuth needed)
+  // Sync Sales Summary from server-side aggregator
+  const syncSalesSheet = useCallback(
+    async (salesUrl?: string, options?: SalesSyncOptions): Promise<SalesSyncResult> => {
+      const rawUrl = (salesUrl ?? connectedSalesUrl).trim();
+      if (!rawUrl) {
+        return { success: false, rows: 0, uniqueSimplified: 0, error: 'Please enter a Sales Google Sheet link.' };
+      }
+
+      const csvUrl = convertGoogleSheetUrlToCsv(rawUrl) || rawUrl;
+      const forceRefresh = options?.forceRefresh ?? false;
+
+      try {
+        setIsSyncingSales(true);
+        setSalesSyncError(null);
+
+        const endpoint = `/api/sales-summary?url=${encodeURIComponent(csvUrl)}${
+          forceRefresh ? '&refresh=1' : ''
+        }&_t=${Date.now()}`;
+        const res = await fetch(endpoint, { cache: 'no-store' });
+
+        if (!res.ok) {
+          const errJson = await res.json().catch(() => null);
+          throw new Error(errJson?.error || `HTTP ${res.status} while syncing sales sheet.`);
+        }
+
+        const data: SalesSummaryData = await res.json();
+        setSalesData(data);
+        saveSalesSummaryToDb(data).catch(() => {});
+
+        if (salesUrl && salesUrl.trim() !== connectedSalesUrl) {
+          setConnectedSalesUrl(salesUrl.trim());
+        }
+
+        return {
+          success: true,
+          rows: data.totalRows,
+          uniqueSimplified: data.uniqueSimplified,
+        };
+      } catch (err: any) {
+        const msg = err?.message || 'Failed to sync sales Google Sheet.';
+        setSalesSyncError(msg);
+        return {
+          success: false,
+          rows: 0,
+          uniqueSimplified: 0,
+          error: msg,
+        };
+      } finally {
+        setIsSyncingSales(false);
+      }
+    },
+    [connectedSalesUrl, setConnectedSalesUrl]
+  );
+
+  // Direct Live Google Sheet CSV Sync (Stock Sheet)
   const syncFromLiveSheet = useCallback(
     async (sheetUrl?: string, options?: SyncOptions): Promise<SyncResult> => {
       const targetUrl = (sheetUrl ?? connectedSheetUrl).trim();
@@ -355,7 +468,6 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         let changedCount = parsed.length;
 
         if (isFirstFullLoad) {
-          // Preserve any edits made on the initial seed items
           const { merged } = mergeSheetItems(parsed, existingItems, preserveLocalEdits);
           finalItems = merged;
         } else {
@@ -398,16 +510,27 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     [connectedSheetUrl, setConnectedSheetUrl]
   );
 
-  // Load from IndexedDB on startup, then auto-sync with live published Google Sheet if online
+  // Load stock + cached sales from IndexedDB on startup, then auto-sync both sheets in background
   useEffect(() => {
     let isMounted = true;
 
     async function initDbAndSync() {
       let loadedCount = 0;
+      let hasCachedSales = false;
+
       try {
         setIsLoading(true);
         setLoadingMessage('Restoring inventory records from offline storage...');
-        const stored = await loadItemsFromDb();
+        const [stored, cachedSales] = await Promise.all([
+          loadItemsFromDb(),
+          loadSalesSummaryFromDb(),
+        ]);
+
+        if (isMounted && cachedSales && cachedSales.bySimplified) {
+          setSalesData(cachedSales);
+          hasCachedSales = true;
+        }
+
         if (isMounted && stored && stored.length > 0) {
           const { items: cleaned, hadDuplicates } = deduplicateItemIds(stored);
           setItems(cleaned);
@@ -429,14 +552,20 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       }
 
       const activeUrl = localStorage.getItem(SHEET_URL_STORAGE_KEY) || DEFAULT_PUBLISHED_SHEET_URL;
-      const shouldAutoSync =
-        typeof navigator !== 'undefined' &&
-        navigator.onLine &&
-        Boolean(activeUrl) &&
-        (autoSyncEnabled || loadedCount <= 400);
+      const activeSalesUrl = localStorage.getItem(SALES_URL_STORAGE_KEY) || DEFAULT_SALES_SHEET_URL;
 
-      if (shouldAutoSync && isMounted) {
-        // Show loading overlay only when upgrading from initial 365 seed records
+      const isOnlineNow = typeof navigator !== 'undefined' && navigator.onLine;
+      const shouldAutoSyncStock =
+        isOnlineNow && Boolean(activeUrl) && (autoSyncEnabled || loadedCount <= 400);
+      const shouldAutoSyncSales =
+        isOnlineNow && Boolean(activeSalesUrl) && (autoSyncEnabled || !hasCachedSales);
+
+      // Start sales sync non-blocking in background so UI opens quickly
+      if (shouldAutoSyncSales && isMounted) {
+        syncSalesSheet(activeSalesUrl, { forceRefresh: false }).catch(() => {});
+      }
+
+      if (shouldAutoSyncStock && isMounted) {
         const silent = loadedCount > 400;
         if (silent) {
           setIsLoading(false);
@@ -471,6 +600,24 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
     return () => clearTimeout(timer);
   }, [items]);
+
+  // Fast sales lookup helpers keyed by normalized Simplified name
+  const getItemSalesRecord = useCallback(
+    (simplified: string): SalesRecord | null => {
+      if (!salesData || !simplified) return null;
+      return salesData.bySimplified[simplified.trim().toLowerCase()] || null;
+    },
+    [salesData]
+  );
+
+  const getItemSales = useCallback(
+    (simplified: string, period?: SalesPeriod): number => {
+      if (!salesData || !simplified) return 0;
+      const rec = salesData.bySimplified[simplified.trim().toLowerCase()];
+      return getSalesValueForRecord(rec, period ?? filters.salesPeriod);
+    },
+    [salesData, filters.salesPeriod]
+  );
 
   // Extract unique categories and colors
   const categories = useMemo(() => {
@@ -725,7 +872,61 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     return list.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()).slice(0, 60);
   }, [items]);
 
-  // Statistics
+  // Filtered & Sorted items
+  const filteredItems = useMemo(() => {
+    const searchLower = filters.search.trim().toLowerCase();
+    const threshold = filters.lowStockThreshold;
+    const period = filters.salesPeriod;
+
+    return items
+      .filter((item) => {
+        if (filters.status === 'out_of_stock' && item.stock !== 0) return false;
+        if (filters.status === 'low_stock' && (item.stock === 0 || item.stock > threshold)) return false;
+        if (filters.status === 'in_stock' && item.stock <= threshold) return false;
+        if (filters.status === 'reorder' && item.stock > threshold) return false;
+
+        if (filters.category !== 'all' && item.item !== filters.category) return false;
+        if (filters.color !== 'all' && item.color !== filters.color) return false;
+
+        if (filters.salesActivity === 'with_sales') {
+          if (getItemSales(item.simplified, period) <= 0) return false;
+        } else if (filters.salesActivity === 'no_sales') {
+          if (getItemSales(item.simplified, period) > 0) return false;
+        }
+
+        if (searchLower) {
+          const matchSku = item.sku.toLowerCase().includes(searchLower);
+          const matchName = item.simplified.toLowerCase().includes(searchLower);
+          const matchCategory = item.item.toLowerCase().includes(searchLower);
+          const matchAsin = item.asin.toLowerCase().includes(searchLower);
+          const matchEan = item.ean.toLowerCase().includes(searchLower);
+          const matchColor = item.color.toLowerCase().includes(searchLower);
+          const matchSize = item.size.toLowerCase().includes(searchLower);
+          return matchSku || matchName || matchCategory || matchAsin || matchEan || matchColor || matchSize;
+        }
+
+        return true;
+      })
+      .sort((a, b) => {
+        if (filters.sortBy === 'stock-asc') return a.stock - b.stock;
+        if (filters.sortBy === 'stock-desc') return b.stock - a.stock;
+        if (filters.sortBy === 'mrp-desc') return b.mrp - a.mrp;
+        if (filters.sortBy === 'simplified') return a.simplified.localeCompare(b.simplified);
+        if (filters.sortBy === 'sku') return a.sku.localeCompare(b.sku);
+        if (filters.sortBy === 'sales-desc') {
+          return getItemSales(b.simplified, period) - getItemSales(a.simplified, period);
+        }
+        if (filters.sortBy === 'sales-asc') {
+          return getItemSales(a.simplified, period) - getItemSales(b.simplified, period);
+        }
+        if (filters.sortBy === 'updated') {
+          return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+        }
+        return 0;
+      });
+  }, [items, filters, getItemSales]);
+
+  // Statistics (including unique-simplified period sales total across filtered items)
   const stats = useMemo(() => {
     let totalUnits = 0;
     let outOfStockCount = 0;
@@ -748,6 +949,17 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       }
     });
 
+    // Sum period sales per unique Simplified name in filtered items to avoid double-counting duplicate SKUs
+    const seenSimplified = new Set<string>();
+    let filteredSalesTotal = 0;
+    filteredItems.forEach((it) => {
+      const k = it.simplified.trim().toLowerCase();
+      if (k && !seenSimplified.has(k)) {
+        seenSimplified.add(k);
+        filteredSalesTotal += getItemSales(it.simplified, filters.salesPeriod);
+      }
+    });
+
     return {
       totalSkus: items.length,
       totalUnits,
@@ -756,49 +968,9 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       healthyCount,
       inventoryValue,
       reorderCount: outOfStockCount + lowStockCount,
+      filteredSalesTotal,
     };
-  }, [items, filters.lowStockThreshold]);
-
-  // Filtered & Sorted items
-  const filteredItems = useMemo(() => {
-    const searchLower = filters.search.trim().toLowerCase();
-    const threshold = filters.lowStockThreshold;
-
-    return items
-      .filter((item) => {
-        if (filters.status === 'out_of_stock' && item.stock !== 0) return false;
-        if (filters.status === 'low_stock' && (item.stock === 0 || item.stock > threshold)) return false;
-        if (filters.status === 'in_stock' && item.stock <= threshold) return false;
-        if (filters.status === 'reorder' && item.stock > threshold) return false;
-
-        if (filters.category !== 'all' && item.item !== filters.category) return false;
-        if (filters.color !== 'all' && item.color !== filters.color) return false;
-
-        if (searchLower) {
-          const matchSku = item.sku.toLowerCase().includes(searchLower);
-          const matchName = item.simplified.toLowerCase().includes(searchLower);
-          const matchCategory = item.item.toLowerCase().includes(searchLower);
-          const matchAsin = item.asin.toLowerCase().includes(searchLower);
-          const matchEan = item.ean.toLowerCase().includes(searchLower);
-          const matchColor = item.color.toLowerCase().includes(searchLower);
-          const matchSize = item.size.toLowerCase().includes(searchLower);
-          return matchSku || matchName || matchCategory || matchAsin || matchEan || matchColor || matchSize;
-        }
-
-        return true;
-      })
-      .sort((a, b) => {
-        if (filters.sortBy === 'stock-asc') return a.stock - b.stock;
-        if (filters.sortBy === 'stock-desc') return b.stock - a.stock;
-        if (filters.sortBy === 'mrp-desc') return b.mrp - a.mrp;
-        if (filters.sortBy === 'simplified') return a.simplified.localeCompare(b.simplified);
-        if (filters.sortBy === 'sku') return a.sku.localeCompare(b.sku);
-        if (filters.sortBy === 'updated') {
-          return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
-        }
-        return 0;
-      });
-  }, [items, filters]);
+  }, [items, filteredItems, filters.lowStockThreshold, filters.salesPeriod, getItemSales]);
 
   return (
     <InventoryContext.Provider
@@ -816,6 +988,14 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         syncFromLiveSheet,
         connectedSheetUrl,
         setConnectedSheetUrl,
+        salesData,
+        connectedSalesUrl,
+        setConnectedSalesUrl,
+        isSyncingSales,
+        salesSyncError,
+        syncSalesSheet,
+        getItemSales,
+        getItemSalesRecord,
         autoSyncEnabled,
         setAutoSyncEnabled,
         isSyncing,

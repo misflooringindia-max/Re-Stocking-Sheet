@@ -10,7 +10,9 @@ import { HistoryDrawer } from './components/HistoryDrawer';
 import { ReorderModal } from './components/ReorderModal';
 import { SyncModal } from './components/SyncModal';
 import { AuditModeModal } from './components/AuditModeModal';
+import { ConsumptionCalculatorModal } from './components/ConsumptionCalculatorModal';
 import { InventoryItem } from './types/inventory';
+import { formatSalesPeriodLabel } from './utils/csvHelper';
 import {
   PackageOpen,
   RotateCcw,
@@ -30,6 +32,7 @@ function DashboardContent() {
   const [isReorderOpen, setIsReorderOpen] = useState(false);
   const [isSyncOpen, setIsSyncOpen] = useState(false);
   const [isAuditOpen, setIsAuditOpen] = useState(false);
+  const [isConsumptionOpen, setIsConsumptionOpen] = useState(false);
 
   // Pagination for high performance across 3,500+ items
   const [displayCount, setDisplayCount] = useState(100);
@@ -81,6 +84,7 @@ function DashboardContent() {
         onOpenReorder={() => setIsReorderOpen(true)}
         onOpenAudit={() => setIsAuditOpen(true)}
         onOpenHistory={handleOpenGlobalHistory}
+        onOpenConsumption={() => setIsConsumptionOpen(true)}
       />
 
       {/* Main Container */}
@@ -92,31 +96,49 @@ function DashboardContent() {
         <StatsCards onOpenReorder={() => setIsReorderOpen(true)} />
 
         {/* Results Bar */}
-        <div className="flex items-center justify-between text-[12px] text-[var(--text-muted)] px-0.5">
-          <div>
-            Showing{' '}
-            <span className="text-[var(--text-primary)] font-medium">
-              {displayedItems.length.toLocaleString()}
-            </span>{' '}
-            of{' '}
-            <span className="text-[var(--text-primary)] font-medium">
-              {filteredItems.length.toLocaleString()}
-            </span>{' '}
-            articles
+        <div className="flex flex-wrap items-center justify-between gap-2 text-[12px] text-[var(--text-muted)] px-0.5">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span>
+              Showing{' '}
+              <span className="text-[var(--text-primary)] font-medium">
+                {displayedItems.length.toLocaleString()}
+              </span>{' '}
+              of{' '}
+              <span className="text-[var(--text-primary)] font-medium">
+                {filteredItems.length.toLocaleString()}
+              </span>{' '}
+              articles
+            </span>
+            <span>
+              • {formatSalesPeriodLabel(filters.salesPeriod)} sales:{' '}
+              <span className="text-[var(--text-primary)] font-mono font-medium">
+                {stats.filteredSalesTotal.toLocaleString()}
+              </span>{' '}
+              units
+            </span>
             {filters.search && (
-              <span className="ml-1 text-[var(--accent)] font-medium">
+              <span className="text-[var(--accent)] font-medium">
                 matching "{filters.search}"
               </span>
             )}
             {filters.status !== 'all' && (
-              <span className="ml-1.5 inline-flex items-center px-2 py-0.5 rounded-full bg-[var(--accent-soft)] text-[var(--accent)] border border-[var(--accent)] text-[11px] font-medium">
+              <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-[var(--accent-soft)] text-[var(--accent)] border border-[var(--accent)] text-[11px] font-medium">
                 {statusLabels[filters.status] || filters.status.replace('_', ' ')}
+              </span>
+            )}
+            {filters.salesActivity !== 'all' && (
+              <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-[var(--accent-soft)] text-[var(--accent)] border border-[var(--accent)] text-[11px] font-medium">
+                {filters.salesActivity === 'with_sales' ? 'Has sales' : 'Zero sales'}
               </span>
             )}
           </div>
 
           <div className="flex items-center gap-2">
-            {(filters.search || filters.category !== 'all' || filters.color !== 'all' || filters.status !== 'all') && (
+            {(filters.search ||
+              filters.category !== 'all' ||
+              filters.color !== 'all' ||
+              filters.status !== 'all' ||
+              filters.salesActivity !== 'all') && (
               <button
                 onClick={() =>
                   setFilters((p) => ({
@@ -125,6 +147,7 @@ function DashboardContent() {
                     category: 'all',
                     color: 'all',
                     status: 'all',
+                    salesActivity: 'all',
                   }))
                 }
                 className="text-[12px] text-[var(--accent)] hover:text-[var(--accent-hover)] font-medium flex items-center gap-1 transition-colors duration-150"
@@ -154,6 +177,7 @@ function DashboardContent() {
                   category: 'all',
                   color: 'all',
                   status: 'all',
+                  salesActivity: 'all',
                 }))
               }
               className="px-4 py-2 rounded-lg bg-[var(--card-bg)] border border-[var(--border)] hover:bg-[var(--table-hover)] text-[var(--text-primary)] text-[12px] font-medium transition-colors duration-150"
@@ -254,6 +278,11 @@ function DashboardContent() {
       <AuditModeModal
         isOpen={isAuditOpen}
         onClose={() => setIsAuditOpen(false)}
+      />
+
+      <ConsumptionCalculatorModal
+        isOpen={isConsumptionOpen}
+        onClose={() => setIsConsumptionOpen(false)}
       />
     </div>
   );

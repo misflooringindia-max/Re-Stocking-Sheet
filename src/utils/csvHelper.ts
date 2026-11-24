@@ -4,6 +4,27 @@ import { resolveImageUrl } from './imageHelper';
 export const DEFAULT_PUBLISHED_SHEET_URL =
   'https://docs.google.com/spreadsheets/d/e/2PACX-1vT-1JU1iWrr58Z3VMEBRAqTeovKDVUKnaete2bYvhjHJzccdiTyYF_BPGTGFqLkGn1K9YByc6bekdd0/pub?output=csv';
 
+export const DEFAULT_SALES_SHEET_URL =
+  'https://docs.google.com/spreadsheets/d/e/2PACX-1vQDxz7MDyPeEDk6TFYU-vAeBPQT3rrZ6G3wXaL_4BQfKMphIBcdm2sbZS2DMYPD5pRbpENut1mI0ol3/pub?output=csv';
+
+export function formatSalesPeriodLabel(period: string): string {
+  if (period === '1m') return '1M';
+  if (period === '3m') return '3M';
+  if (period === '6m') return '6M';
+  if (period === '12m') return '12M';
+  if (period === 'all') return 'All';
+  if (period.startsWith('month:')) {
+    const ym = period.slice(6);
+    const [y, m] = ym.split('-');
+    const date = new Date(Date.UTC(Number(y), Number(m) - 1, 1));
+    if (!Number.isNaN(date.getTime())) {
+      return date.toLocaleDateString('en-US', { month: 'short', year: '2-digit', timeZone: 'UTC' });
+    }
+    return ym;
+  }
+  return period;
+}
+
 /**
  * Converts any Google Sheet share link or published link into a direct CSV export URL.
  * Supports:

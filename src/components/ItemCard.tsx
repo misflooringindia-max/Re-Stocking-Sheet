@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { InventoryItem } from '../types/inventory';
 import { useInventory } from '../context/InventoryContext';
+import { formatSalesPeriodLabel } from '../utils/csvHelper';
 import { ItemImage } from './ItemImage';
 import {
   Plus,
@@ -21,7 +22,10 @@ export const ItemCard: React.FC<ItemCardProps> = ({
   onOpenDetails,
   onOpenItemHistory,
 }) => {
-  const { updateStock, updateSimplified, quickAdjustStock, filters } = useInventory();
+  const { updateStock, updateSimplified, quickAdjustStock, filters, getItemSales } = useInventory();
+
+  const periodSales = getItemSales(item.simplified, filters.salesPeriod);
+  const periodLabel = formatSalesPeriodLabel(filters.salesPeriod);
 
   // Inline editing state for Simplified name
   const [isEditingName, setIsEditingName] = useState(false);
@@ -148,7 +152,7 @@ export const ItemCard: React.FC<ItemCardProps> = ({
             SKU: <span className="select-all">{item.sku}</span>
           </div>
 
-          {/* Color & Size & MRP specs */}
+          {/* Color, Size, MRP & Sales specs */}
           <div className="flex items-center gap-1.5 mt-1 text-[12px] text-[var(--text-muted)] flex-wrap">
             {item.color && item.color !== 'Standard' && (
               <span className="truncate">{item.color}</span>
@@ -167,6 +171,14 @@ export const ItemCard: React.FC<ItemCardProps> = ({
                 </span>
               </>
             )}
+          </div>
+
+          {/* Sales for active period */}
+          <div className="mt-1.5 text-[12px] text-[var(--text-muted)] flex items-center gap-1.5">
+            <span>Sales ({periodLabel}):</span>
+            <span className="font-mono font-medium text-[var(--text-primary)]">
+              {periodSales.toLocaleString()}
+            </span>
           </div>
         </div>
       </div>

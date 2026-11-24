@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { InventoryItem } from '../types/inventory';
 import { useInventory } from '../context/InventoryContext';
+import { formatSalesPeriodLabel } from '../utils/csvHelper';
 import { ItemImage } from './ItemImage';
 import {
   Plus,
@@ -22,8 +23,10 @@ export const ItemTable: React.FC<ItemTableProps> = ({
   onOpenDetails,
   onOpenItemHistory,
 }) => {
-  const { updateStock, updateSimplified, quickAdjustStock, filters, setFilters } =
+  const { updateStock, updateSimplified, quickAdjustStock, filters, setFilters, getItemSales } =
     useInventory();
+
+  const periodLabel = formatSalesPeriodLabel(filters.salesPeriod);
 
   // Active inline editing cell tracking
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -55,11 +58,13 @@ export const ItemTable: React.FC<ItemTableProps> = ({
     setEditingField(null);
   };
 
-  const handleSort = (field: 'sku' | 'simplified' | 'stock' | 'mrp') => {
+  const handleSort = (field: 'sku' | 'simplified' | 'stock' | 'mrp' | 'sales') => {
     setFilters((p) => {
       let nextSort: any = 'stock-asc';
       if (field === 'stock') {
         nextSort = p.sortBy === 'stock-asc' ? 'stock-desc' : 'stock-asc';
+      } else if (field === 'sales') {
+        nextSort = p.sortBy === 'sales-desc' ? 'sales-asc' : 'sales-desc';
       } else if (field === 'simplified') {
         nextSort = 'simplified';
       } else if (field === 'sku') {
@@ -109,6 +114,15 @@ export const ItemTable: React.FC<ItemTableProps> = ({
                 </div>
               </th>
               <th
+                onClick={() => handleSort('sales')}
+                className="py-3 px-2.5 cursor-pointer hover:text-[var(--text-primary)] transition-colors duration-150 font-medium whitespace-nowrap"
+              >
+                <div className="flex items-center gap-1">
+                  <span>Sales ({periodLabel})</span>
+                  <ArrowUpDown className="w-3 h-3 text-[var(--text-muted)]" />
+                </div>
+              </th>
+              <th
                 onClick={() => handleSort('mrp')}
                 className="py-3 px-2.5 cursor-pointer hover:text-[var(--text-primary)] transition-colors duration-150 font-medium"
               >
@@ -123,6 +137,7 @@ export const ItemTable: React.FC<ItemTableProps> = ({
           </thead>
           <tbody className="divide-y divide-[var(--table-divider)] text-[var(--text-primary)] font-normal">
             {items.map((item) => {
+              const periodSales = getItemSales(item.simplified, filters.salesPeriod);
               const isOutOfStock = item.stock === 0;
               const isLowStock = !isOutOfStock && item.stock <= filters.lowStockThreshold;
 
@@ -272,6 +287,11 @@ export const ItemTable: React.FC<ItemTableProps> = ({
                         </button>
                       </div>
                     </div>
+                  </td>
+
+                  {/* Sales for selected period */}
+                  <td className="py-2.5 px-2.5 font-mono font-medium text-[var(--text-primary)] whitespace-nowrap">
+                    {periodSales.toLocaleString()}
                   </td>
 
                   {/* MRP */}

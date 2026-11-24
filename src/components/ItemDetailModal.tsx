@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { InventoryItem } from '../types/inventory';
 import { useInventory } from '../context/InventoryContext';
+import { formatSalesPeriodLabel } from '../utils/csvHelper';
 import { ItemImage } from './ItemImage';
 import {
   X,
@@ -10,6 +11,7 @@ import {
   ExternalLink,
   Layers,
   ArrowRight,
+  TrendingUp,
 } from 'lucide-react';
 
 interface ItemDetailModalProps {
@@ -23,7 +25,8 @@ export const ItemDetailModal: React.FC<ItemDetailModalProps> = ({
   onClose,
   onOpenHistory,
 }) => {
-  const { updateStock, updateSimplified, filters } = useInventory();
+  const { updateStock, updateSimplified, filters, getItemSalesRecord, getItemSales, salesData } =
+    useInventory();
 
   if (!item) return null;
 
@@ -49,6 +52,31 @@ export const ItemDetailModal: React.FC<ItemDetailModalProps> = ({
 
   const isOutOfStock = item.stock === 0;
   const isLowStock = !isOutOfStock && item.stock <= filters.lowStockThreshold;
+  const salesRecord = getItemSalesRecord(item.simplified);
+  const activePeriodLabel = formatSalesPeriodLabel(filters.salesPeriod);
+  const activePeriodUnits = getItemSales(item.simplified, filters.salesPeriod);
+
+  const topPortals = salesRecord
+    ? Object.entries(salesRecord.portals)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 6)
+    : [];
+
+  const recentMonths = salesRecord
+    ? Object.entries(salesRecord.monthly)
+        .sort((a, b) => b[0].localeCompare(a[0]))
+        .slice(0, 6)
+    : [];
+
+  const formatMonthShort = (ym: string) => {
+    const [y, m] = ym.split('-').map(Number);
+    if (!y || !m) return ym;
+    return new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString('en-US', {
+      month: 'short',
+      year: '2-digit',
+      timeZone: 'UTC',
+    });
+  };
 
   const formatDate = (isoString: string) => {
     try {
@@ -283,6 +311,103 @@ export const ItemDetailModal: React.FC<ItemDetailModalProps> = ({
                 </button>
               </div>
             </div>
+          </div>
+
+          {/* Sales Summary per Simplified */}
+          <div className="p-4 rounded-xl bg-[var(--card-bg)] border border-[var(--border)] space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-[13px] font-medium text-[var(--text-primary)] flex items-center gap-1.5">
+                <TrendingUp className="w-4 h-4 text-[var(--text-muted)]" />
+                <span>Sales summary ({item.simplified})</span>
+              </span>
+              <span className="text-[12px] text-[var(--text-muted)]">
+                Selected ({activePeriodLabel}):{' '}
+                <span className="font-mono font-medium text-[var(--accent)]">
+                  {activePeriodUnits.toLocaleString()} units
+                </span>
+              </span>
+            </div>
+
+            {salesRecord ? (
+              <>
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-[12px]">
+                  {[
+                    { key: '1m', label: '1 Month', val: salesRecord.m1 },
+                    { key: '3m', label: '3 Months', val: salesRecord.m3 },
+                    { key: '6m', label: '6 Months', val: salesRecord.m6 },
+                    { key: '12m', label: '12 Months', val: salesRecord.m12 },
+                    { key: 'all', label: 'All Time', val: salesRecord.total },
+                  ].map((box) => {
+                    const isSelected = filters.salesPeriod === box.key;
+                    return (
+                      <div
+                        key={box.key}
+                        className={`p-2.5 rounded-lg border ${
+                          isSelected
+                            ? 'bg-[var(--accent-soft)] border-[var(--accent)]'
+                            : 'bg-[var(--surface-subtle)] border-[var(--border)]'
+                        }`}
+                      >
+                        <span
+                          className={`block text-[11px] ${
+                            isSelected ? 'text-[var(--accent)] font-medium' : 'text-[var(--text-muted)]'
+                          }`}
+                        >
+                          {box.label}
+                        </span>
+                        <span className="block mt-0.5 font-mono font-medium text-[14px] text-[var(--text-primary)]">
+                          {box.val.toLocaleString()}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {topPortals.length > 0 && (
+                  <div className="space-y-1.5 pt-1">
+                    <span className="text-[11px] text-[var(--text-muted)] block">
+                      Sales by portal ({salesRecord.orders.toLocaleString()} orders)
+                    </span>
+                    <div className="flex flex-wrap gap-1.5">
+                      {topPortals.map(([portal, qty]) => (
+                        <span
+                          key={portal}
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[var(--surface-subtle)] border border-[var(--border)] text-[11px] text-[var(--text-primary)]"
+                        >
+                          <span className="text-[var(--text-muted)]">{portal}</span>
+                          <span className="font-mono font-medium">{qty.toLocaleString()}</span>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {recentMonths.length > 0 && (
+                  <div className="space-y-1.5 pt-1">
+                    <span className="text-[11px] text-[var(--text-muted)] block">
+                      Recent monthly units
+                    </span>
+                    <div className="flex flex-wrap gap-1.5">
+                      {recentMonths.map(([ym, qty]) => (
+                        <span
+                          key={ym}
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[var(--card-bg)] border border-[var(--border)] text-[11px] text-[var(--text-primary)]"
+                        >
+                          <span className="text-[var(--text-muted)]">{formatMonthShort(ym)}</span>
+                          <span className="font-mono font-medium">{qty.toLocaleString()}</span>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </>
+            ) : (
+              <p className="text-[12px] text-[var(--text-muted)]">
+                {salesData
+                  ? 'No sales recorded for this Simplified article name in the connected sales sheet.'
+                  : 'Syncing sales sheet data in background...'}
+              </p>
+            )}
           </div>
 
           {/* Past 3 to 5 Updates Timeline Section */}

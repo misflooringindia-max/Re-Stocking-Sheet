@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { useInventory } from '../context/InventoryContext';
+import { formatSalesPeriodLabel } from '../utils/csvHelper';
 import { ItemImage } from './ItemImage';
 import {
   X,
@@ -16,7 +17,9 @@ interface ReorderModalProps {
 }
 
 export const ReorderModal: React.FC<ReorderModalProps> = ({ isOpen, onClose }) => {
-  const { items, filters, batchUpdateStock } = useInventory();
+  const { items, filters, batchUpdateStock, getItemSales } = useInventory();
+
+  const periodLabel = formatSalesPeriodLabel(filters.salesPeriod);
 
   // Target stock level for replenishment calculation
   const [targetStock, setTargetStock] = useState<number>(50);
@@ -30,14 +33,16 @@ export const ReorderModal: React.FC<ReorderModalProps> = ({ isOpen, onClose }) =
       .map((it) => {
         const needed = Math.max(0, targetStock - it.stock);
         const estimatedValue = needed * (it.mrp || 0);
+        const periodSales = getItemSales(it.simplified, filters.salesPeriod);
         return {
           ...it,
           suggestedReorder: needed,
           estimatedValue,
+          periodSales,
         };
       })
       .sort((a, b) => a.stock - b.stock);
-  }, [items, filters.lowStockThreshold, targetStock]);
+  }, [items, filters.lowStockThreshold, filters.salesPeriod, targetStock, getItemSales]);
 
   const totalUnitsNeeded = useMemo(() => {
     return reorderList.reduce((acc, curr) => acc + curr.suggestedReorder, 0);
@@ -58,6 +63,7 @@ export const ReorderModal: React.FC<ReorderModalProps> = ({ isOpen, onClose }) =
       'Color',
       'Size',
       'Current Stock',
+      `Sales (${periodLabel})`,
       'Target Stock',
       'Suggested Re-Order QTY',
       'Unit MRP',
@@ -72,6 +78,7 @@ export const ReorderModal: React.FC<ReorderModalProps> = ({ isOpen, onClose }) =
       `"${it.color.replace(/"/g, '""')}"`,
       `"${it.size.replace(/"/g, '""')}"`,
       it.stock,
+      it.periodSales,
       targetStock,
       it.suggestedReorder,
       it.mrp,
@@ -100,6 +107,7 @@ export const ReorderModal: React.FC<ReorderModalProps> = ({ isOpen, onClose }) =
       'Color',
       'Size',
       'Current Stock',
+      `Sales (${periodLabel})`,
       'Suggested Re-Order QTY',
       'MRP',
       'Estimated Value',
@@ -112,6 +120,7 @@ export const ReorderModal: React.FC<ReorderModalProps> = ({ isOpen, onClose }) =
       it.color,
       it.size,
       it.stock,
+      it.periodSales,
       it.suggestedReorder,
       it.mrp,
       it.estimatedValue,
@@ -245,6 +254,7 @@ export const ReorderModal: React.FC<ReorderModalProps> = ({ isOpen, onClose }) =
                     <th className="py-2.5 px-3 font-medium">Article</th>
                     <th className="py-2.5 px-2.5 font-medium">Uniware SKU</th>
                     <th className="py-2.5 px-2.5 font-medium">Current stock</th>
+                    <th className="py-2.5 px-2.5 font-medium whitespace-nowrap">Sales ({periodLabel})</th>
                     <th className="py-2.5 px-2.5 font-medium">Suggested order</th>
                     <th className="py-2.5 px-2.5 font-medium">Unit MRP</th>
                     <th className="py-2.5 px-3 text-right font-medium">Est. cost</th>
@@ -284,6 +294,9 @@ export const ReorderModal: React.FC<ReorderModalProps> = ({ isOpen, onClose }) =
                         >
                           {item.stock} left
                         </span>
+                      </td>
+                      <td className="py-2.5 px-2.5 font-mono font-medium text-[var(--text-primary)]">
+                        {item.periodSales.toLocaleString()}
                       </td>
                       <td className="py-2.5 px-2.5 font-mono font-medium text-[var(--accent)]">
                         +{item.suggestedReorder}

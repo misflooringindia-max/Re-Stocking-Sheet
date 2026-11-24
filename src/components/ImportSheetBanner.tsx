@@ -19,11 +19,15 @@ export const ImportSheetBanner: React.FC<ImportSheetBannerProps> = ({ onOpenSync
     stats,
     importCsvData,
     syncFromLiveSheet,
+    syncSalesSheet,
+    salesData,
     connectedSheetUrl,
     lastSyncTime,
     isSyncing,
+    isSyncingSales,
     isOnline,
     syncError,
+    salesSyncError,
   } = useInventory();
   const [status, setStatus] = useState<string | null>(null);
   const [isError, setIsError] = useState(false);
@@ -53,9 +57,12 @@ export const ImportSheetBanner: React.FC<ImportSheetBannerProps> = ({ onOpenSync
   };
 
   const handleDirectSync = async () => {
-    setStatus('Syncing latest articles from Google Sheet...');
+    setStatus('Syncing latest stock and sales from Google Sheets...');
     setIsError(false);
-    const res = await syncFromLiveSheet(connectedSheetUrl);
+    const [res] = await Promise.all([
+      syncFromLiveSheet(connectedSheetUrl),
+      syncSalesSheet(undefined, { forceRefresh: true }),
+    ]);
     if (res.success) {
       setIsError(false);
       setStatus(`Synced ${res.count.toLocaleString()} products from your Google Sheet.`);
@@ -79,20 +86,32 @@ export const ImportSheetBanner: React.FC<ImportSheetBannerProps> = ({ onOpenSync
   if (hasLoadedFull) {
     return (
       <div className="bg-[var(--card-bg)] border border-[var(--border)] rounded-xl px-4 py-3 flex flex-wrap items-center justify-between gap-3 text-[12px] text-[var(--text-muted)]">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <Database className="w-4 h-4 text-[var(--text-muted)] shrink-0" />
           <span>
             <span className="text-[var(--text-primary)] font-medium">
               {stats.totalSkus.toLocaleString()}
             </span>{' '}
-            articles synced via direct Google Sheet link
+            articles synced
+            {salesData && (
+              <>
+                {' '}•{' '}
+                <span className="text-[var(--text-primary)] font-medium">
+                  {salesData.totalRows.toLocaleString()}
+                </span>{' '}
+                sales records ({salesData.minDate} to {salesData.maxDate})
+              </>
+            )}
+            {isSyncingSales && !salesData && (
+              <span className="ml-1.5">• Syncing sales sheet...</span>
+            )}
             {formattedLastSync && (
               <span className="text-[var(--text-muted)] ml-1.5">• Last synced {formattedLastSync}</span>
             )}
           </span>
         </div>
         <div className="flex items-center gap-3">
-          {syncError && (
+          {(syncError || salesSyncError) && (
             <span className="text-[var(--text-primary)] font-medium flex items-center gap-1">
               <AlertCircle className="w-3.5 h-3.5 text-[var(--text-muted)]" />
               <span>Sync error</span>
@@ -100,17 +119,21 @@ export const ImportSheetBanner: React.FC<ImportSheetBannerProps> = ({ onOpenSync
           )}
           <button
             onClick={handleDirectSync}
-            disabled={isSyncing || !isOnline}
+            disabled={isSyncing || isSyncingSales || !isOnline}
             className="px-2.5 py-1 rounded-lg bg-[var(--card-bg)] border border-[var(--border)] hover:bg-[var(--table-hover)] disabled:opacity-40 text-[var(--text-primary)] font-medium flex items-center gap-1.5 transition-colors duration-150"
           >
-            <RefreshCw className={`w-3.5 h-3.5 text-[var(--text-muted)] ${isSyncing ? 'animate-spin' : ''}`} />
-            <span>{isSyncing ? 'Syncing...' : 'Refresh sheet'}</span>
+            <RefreshCw
+              className={`w-3.5 h-3.5 text-[var(--text-muted)] ${
+                isSyncing || isSyncingSales ? 'animate-spin' : ''
+              }`}
+            />
+            <span>{isSyncing || isSyncingSales ? 'Syncing...' : 'Refresh sheets'}</span>
           </button>
           <button
             onClick={onOpenSync}
             className="text-[var(--accent)] hover:text-[var(--accent-hover)] font-medium transition-colors duration-150"
           >
-            Manage link &amp; export →
+            Manage links &amp; export →
           </button>
         </div>
       </div>

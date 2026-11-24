@@ -2,7 +2,7 @@
  * IndexedDB storage layer for large inventory datasets (3,500+ to 50,000+ items)
  * Overcomes localStorage's 5MB quota limit.
  */
-import { InventoryItem } from '../types/inventory';
+import { InventoryItem, SalesSummaryData } from '../types/inventory';
 
 const DB_NAME = 'StockSyncDB';
 const DB_VERSION = 1;
@@ -86,6 +86,42 @@ export async function loadItemsFromDb(): Promise<InventoryItem[] | null> {
     });
   } catch (err) {
     console.warn('IndexedDB load failed', err);
+    return null;
+  }
+}
+
+export async function saveSalesSummaryToDb(summary: SalesSummaryData): Promise<void> {
+  try {
+    const db = await openDatabase();
+    const tx = db.transaction(META_STORE, 'readwrite');
+    const meta = tx.objectStore(META_STORE);
+    meta.put({ key: 'sales_summary', value: summary });
+
+    return new Promise((resolve, reject) => {
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch (err) {
+    console.warn('Failed to save sales summary to IndexedDB', err);
+  }
+}
+
+export async function loadSalesSummaryFromDb(): Promise<SalesSummaryData | null> {
+  try {
+    const db = await openDatabase();
+    const tx = db.transaction(META_STORE, 'readonly');
+    const meta = tx.objectStore(META_STORE);
+    const request = meta.get('sales_summary');
+
+    return new Promise((resolve, reject) => {
+      request.onsuccess = () => {
+        const row = request.result;
+        resolve(row?.value ?? null);
+      };
+      request.onerror = () => reject(request.error);
+    });
+  } catch (err) {
+    console.warn('Failed to load sales summary from IndexedDB', err);
     return null;
   }
 }
