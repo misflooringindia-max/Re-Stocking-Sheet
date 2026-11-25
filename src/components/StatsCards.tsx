@@ -5,7 +5,6 @@ import {
   AlertTriangle,
   XCircle,
   CheckCircle2,
-  IndianRupee,
   ShoppingCart,
 } from 'lucide-react';
 import { StockStatus } from '../types/inventory';
@@ -24,33 +23,8 @@ export const StatsCards: React.FC<StatsCardsProps> = ({ onOpenReorder }) => {
     }));
   };
 
-  const formatCurrency = (val: number) => {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'INR',
-      maximumFractionDigits: 0,
-    }).format(val);
-  };
-
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-4">
-      {/* Inventory Value */}
-      <div className="bg-[var(--card-bg)] border border-[var(--border)] rounded-xl p-4 flex flex-col justify-between">
-        <div className="flex items-center justify-between">
-          <span className="text-[12px] font-normal text-[var(--text-muted)]">
-            Inventory Value
-          </span>
-          <IndianRupee className="w-4 h-4 text-[var(--text-muted)] shrink-0" />
-        </div>
-        <div className="mt-2.5">
-          <div className="text-[22px] xl:text-[24px] leading-tight font-medium text-[var(--text-primary)] tracking-tight truncate">
-            {formatCurrency(stats.inventoryValue)}
-          </div>
-          <div className="text-[12px] text-[var(--text-muted)] mt-1">
-            Based on MRP valuation
-          </div>
-        </div>
-      </div>
+    <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-4">
 
       {/* Total SKUs */}
       <button
