@@ -3,6 +3,7 @@ import { InventoryItem } from '../types/inventory';
 import { useInventory } from '../context/InventoryContext';
 import { formatSalesPeriodLabel } from '../utils/csvHelper';
 import { ItemImage } from './ItemImage';
+import { CopyButton } from './CopyButton';
 import {
   X,
   Edit3,
@@ -103,9 +104,16 @@ export const ItemDetailModal: React.FC<ItemDetailModalProps> = ({
         {/* Header */}
         <div className="p-4 border-b border-[var(--table-divider)] flex items-center justify-between bg-[var(--card-bg)]">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="font-mono text-[12px] font-medium text-[var(--text-muted)] bg-[var(--surface-subtle)] px-2 py-0.5 rounded-lg border border-[var(--border)]">
-              {item.sku}
-            </span>
+            <div className="group/sku flex items-center gap-1">
+              <span className="font-mono text-[12px] font-medium text-[var(--text-muted)] bg-[var(--surface-subtle)] px-2 py-0.5 rounded-lg border border-[var(--border)]">
+                {item.sku}
+              </span>
+              <CopyButton
+                value={item.sku}
+                label="Copy SKU"
+                className="opacity-0 group-hover/sku:opacity-100 focus-visible:opacity-100"
+              />
+            </div>
             <span
               className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${
                 isOutOfStock
@@ -184,12 +192,20 @@ export const ItemDetailModal: React.FC<ItemDetailModalProps> = ({
                 ) : (
                   <div
                     onClick={() => setIsEditingName(true)}
-                    className="group cursor-pointer flex items-start justify-between p-2 -mx-2 rounded-lg hover:bg-[var(--table-hover)] transition-colors duration-150"
+                    className="group/name cursor-pointer flex items-start justify-between gap-2 p-2 -mx-2 rounded-lg hover:bg-[var(--table-hover)] transition-colors duration-150"
                   >
-                    <h2 className="text-[16px] font-medium text-[var(--text-primary)] group-hover:text-[var(--accent)] leading-snug">
+                    <h2 className="text-[16px] font-medium text-[var(--text-primary)] group-hover/name:text-[var(--accent)] leading-snug">
                       {item.simplified}
                     </h2>
-                    <Edit3 className="w-4 h-4 text-[var(--text-muted)] shrink-0 ml-2 mt-0.5" />
+                    <div className="flex items-center gap-1.5 shrink-0 mt-0.5">
+                      <CopyButton
+                        value={item.simplified}
+                        label="Copy name"
+                        size="sm"
+                        className="opacity-0 group-hover/name:opacity-100 focus-visible:opacity-100"
+                      />
+                      <Edit3 className="w-4 h-4 text-[var(--text-muted)]" />
+                    </div>
                   </div>
                 )}
               </div>
@@ -258,7 +274,7 @@ export const ItemDetailModal: React.FC<ItemDetailModalProps> = ({
 
             <div className="flex flex-wrap items-center gap-3">
               {/* Direct Stock Input */}
-              <div className="flex items-center gap-2 bg-[var(--card-bg)] px-3 py-1.5 rounded-lg border border-[var(--border)]">
+              <div className="group/qty flex items-center gap-2 bg-[var(--card-bg)] px-3 py-1.5 rounded-lg border border-[var(--border)]">
                 <span className="text-[12px] font-normal text-[var(--text-muted)]">Current qty:</span>
                 <input
                   type="number"
@@ -268,6 +284,11 @@ export const ItemDetailModal: React.FC<ItemDetailModalProps> = ({
                   onBlur={() => handleStockSave()}
                   onKeyDown={(e) => e.key === 'Enter' && handleStockSave()}
                   className="w-20 bg-transparent text-center font-mono font-medium text-[16px] text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)] rounded"
+                />
+                <CopyButton
+                  value={item.stock}
+                  label="Copy qty"
+                  className="opacity-0 group-hover/qty:opacity-100 focus-visible:opacity-100"
                 />
                 <button
                   onClick={() => handleStockSave()}

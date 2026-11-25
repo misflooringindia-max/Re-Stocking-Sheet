@@ -3,6 +3,7 @@ import { InventoryItem } from '../types/inventory';
 import { useInventory } from '../context/InventoryContext';
 import { formatSalesPeriodLabel } from '../utils/csvHelper';
 import { ItemImage } from './ItemImage';
+import { CopyButton } from './CopyButton';
 import {
   Plus,
   Minus,
@@ -172,13 +173,20 @@ export const ItemTable: React.FC<ItemTableProps> = ({
 
                   {/* SKU Column */}
                   <td className="py-2.5 px-3">
-                    <span
-                      onClick={() => onOpenDetails(item)}
-                      className="font-mono text-[12px] text-[var(--text-muted)] cursor-pointer hover:text-[var(--accent)] hover:underline select-all transition-colors duration-150"
-                      title={item.sku}
-                    >
-                      {item.sku}
-                    </span>
+                    <div className="group/sku flex items-center gap-1.5">
+                      <span
+                        onClick={() => onOpenDetails(item)}
+                        className="font-mono text-[12px] text-[var(--text-muted)] cursor-pointer hover:text-[var(--accent)] hover:underline select-all transition-colors duration-150"
+                        title={item.sku}
+                      >
+                        {item.sku}
+                      </span>
+                      <CopyButton
+                        value={item.sku}
+                        label="Copy SKU"
+                        className="opacity-0 group-hover/sku:opacity-100 focus-visible:opacity-100"
+                      />
+                    </div>
                   </td>
 
                   {/* Simplified Name (Inline Editable) */}
@@ -204,13 +212,20 @@ export const ItemTable: React.FC<ItemTableProps> = ({
                     ) : (
                       <div
                         onClick={() => startEdit(item.id, 'simplified', item.simplified)}
-                        className="flex items-center justify-between cursor-pointer py-1 px-1.5 -mx-1.5 rounded-lg hover:bg-[var(--surface-subtle)] transition-colors duration-150 group/edit"
+                        className="flex items-center justify-between gap-1.5 cursor-pointer py-1 px-1.5 -mx-1.5 rounded-lg hover:bg-[var(--surface-subtle)] transition-colors duration-150 group/edit"
                         title="Click to edit simplified name"
                       >
                         <span className="text-[var(--text-primary)] font-medium group-hover/edit:text-[var(--accent)]">
                           {item.simplified}
                         </span>
-                        <Edit2 className="w-3 h-3 text-[var(--text-muted)] opacity-0 group-hover/edit:opacity-100 shrink-0 ml-1" />
+                        <div className="flex items-center gap-1 shrink-0">
+                          <CopyButton
+                            value={item.simplified}
+                            label="Copy name"
+                            className="opacity-0 group-hover/edit:opacity-100 focus-visible:opacity-100"
+                          />
+                          <Edit2 className="w-3 h-3 text-[var(--text-muted)] opacity-0 group-hover/edit:opacity-100" />
+                        </div>
                       </div>
                     )}
                   </td>
@@ -251,14 +266,21 @@ export const ItemTable: React.FC<ItemTableProps> = ({
                           </button>
                         </div>
                       ) : (
-                        <button
-                          onClick={() => startEdit(item.id, 'stock', item.stock.toString())}
-                          className={`px-2.5 py-1 rounded-lg font-mono font-medium text-[12px] transition-colors duration-150 flex items-center gap-1.5 ${stockPillClass}`}
-                          title="Click to edit stock level"
-                        >
-                          <span>{item.stock}</span>
-                          <Edit2 className="w-2.5 h-2.5 opacity-70" />
-                        </button>
+                        <div className="group/qty flex items-center gap-1">
+                          <button
+                            onClick={() => startEdit(item.id, 'stock', item.stock.toString())}
+                            className={`px-2.5 py-1 rounded-lg font-mono font-medium text-[12px] transition-colors duration-150 flex items-center gap-1.5 ${stockPillClass}`}
+                            title="Click to edit stock level"
+                          >
+                            <span>{item.stock}</span>
+                            <Edit2 className="w-2.5 h-2.5 opacity-70" />
+                          </button>
+                          <CopyButton
+                            value={item.stock}
+                            label="Copy qty"
+                            className="opacity-0 group-hover/qty:opacity-100 focus-visible:opacity-100"
+                          />
+                        </div>
                       )}
 
                       {/* Outlined Steppers */}
