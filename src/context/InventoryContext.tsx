@@ -85,6 +85,7 @@ interface InventoryContextType {
   globalHistory: (StockHistoryEntry & { sku: string; simplified: string; itemId: string })[];
   categories: string[];
   colors: string[];
+  sizes: string[];
   stats: {
     totalSkus: number;
     totalUnits: number;
@@ -344,6 +345,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     search: '',
     category: 'all',
     color: 'all',
+    size: 'all',
     status: 'all',
     sortBy: 'stock-asc',
     lowStockThreshold: DEFAULT_THRESHOLD,
@@ -621,22 +623,36 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     [salesData, filters.salesPeriod]
   );
 
-  // Extract unique categories and colors
+  // Extract unique categories, colors, and sizes (naturally sorted)
   const categories = useMemo(() => {
     const set = new Set<string>();
     items.forEach((item) => {
       if (item.item && item.item.trim()) set.add(item.item.trim());
     });
-    return Array.from(set).sort();
+    return Array.from(set).sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
   }, [items]);
 
   const colors = useMemo(() => {
     const set = new Set<string>();
+    const hasCategoryFilter = filters.category !== 'all';
     items.forEach((item) => {
+      if (hasCategoryFilter && item.item !== filters.category) return;
       if (item.color && item.color.trim()) set.add(item.color.trim());
     });
-    return Array.from(set).sort();
-  }, [items]);
+    if (filters.color !== 'all') set.add(filters.color);
+    return Array.from(set).sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+  }, [items, filters.category, filters.color]);
+
+  const sizes = useMemo(() => {
+    const set = new Set<string>();
+    const hasCategoryFilter = filters.category !== 'all';
+    items.forEach((item) => {
+      if (hasCategoryFilter && item.item !== filters.category) return;
+      if (item.size && item.size.trim()) set.add(item.size.trim());
+    });
+    if (filters.size !== 'all') set.add(filters.size);
+    return Array.from(set).sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+  }, [items, filters.category, filters.size]);
 
   const modifiedCount = useMemo(() => {
     return items.filter((it) => it.locallyModified).length;
@@ -888,7 +904,8 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         if (filters.status === 'reorder' && item.stock > threshold) return false;
 
         if (filters.category !== 'all' && item.item !== filters.category) return false;
-        if (filters.color !== 'all' && item.color !== filters.color) return false;
+        if (filters.color !== 'all' && (item.color || '').trim() !== filters.color) return false;
+        if (filters.size !== 'all' && (item.size || '').trim() !== filters.size) return false;
 
         if (filters.salesActivity === 'with_sales') {
           if (getItemSales(item.simplified, period) <= 0) return false;
@@ -1015,6 +1032,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         globalHistory,
         categories,
         colors,
+        sizes,
         stats,
       }}
     >

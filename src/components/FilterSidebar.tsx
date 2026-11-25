@@ -17,6 +17,7 @@ import {
 export type FilterSectionKey =
   | 'category'
   | 'color'
+  | 'size'
   | 'sortBy'
   | 'status'
   | 'salesPeriod'
@@ -25,11 +26,12 @@ export type FilterSectionKey =
 
 type AccordionState = Record<FilterSectionKey, boolean>;
 
-const ACCORDION_STORAGE_KEY = 'stocksync_sidebar_accordion_v1';
+const ACCORDION_STORAGE_KEY = 'stocksync_sidebar_accordion_v2';
 
 const DEFAULT_ACCORDION_STATE: AccordionState = {
   category: true,
-  color: false,
+  color: true,
+  size: true,
   sortBy: false,
   status: true,
   salesPeriod: true,
@@ -80,8 +82,22 @@ const AccordionSection: React.FC<AccordionSectionProps> = ({
   isHighlighted = false,
   children,
 }) => {
+  const sectionRef = useRef<HTMLDivElement>(null);
+  const wasOpenRef = useRef(isOpen);
+
+  useEffect(() => {
+    const prevOpen = wasOpenRef.current;
+    wasOpenRef.current = isOpen;
+    if (!prevOpen && isOpen && sectionRef.current) {
+      const timer = window.setTimeout(() => {
+        sectionRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      }, 220);
+      return () => window.clearTimeout(timer);
+    }
+  }, [isOpen]);
+
   return (
-    <div className="border-b border-[var(--table-divider)] last:border-b-0">
+    <div ref={sectionRef} className="border-b border-[var(--table-divider)] last:border-b-0">
       <button
         type="button"
         onClick={onToggle}
@@ -131,6 +147,7 @@ interface SidebarScrollAreaProps {
 
 const SidebarScrollArea: React.FC<SidebarScrollAreaProps> = ({ children }) => {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
   const trackRef = useRef<HTMLDivElement>(null);
   const thumbRef = useRef<HTMLDivElement>(null);
   const dragStateRef = useRef<{ startY: number; startScrollTop: number } | null>(null);
@@ -181,6 +198,7 @@ const SidebarScrollArea: React.FC<SidebarScrollAreaProps> = ({ children }) => {
 
   useEffect(() => {
     const el = scrollRef.current;
+    const content = contentRef.current;
     const track = trackRef.current;
     if (!el) return;
 
@@ -190,8 +208,8 @@ const SidebarScrollArea: React.FC<SidebarScrollAreaProps> = ({ children }) => {
       syncThumb();
     });
     resizeObserver.observe(el);
+    if (content) resizeObserver.observe(content);
     if (track) resizeObserver.observe(track);
-    if (el.firstElementChild) resizeObserver.observe(el.firstElementChild);
 
     const mutationObserver = new MutationObserver(() => {
       requestAnimationFrame(syncThumb);
@@ -280,9 +298,11 @@ const SidebarScrollArea: React.FC<SidebarScrollAreaProps> = ({ children }) => {
       <div
         ref={scrollRef}
         onScroll={syncThumb}
-        className="flex-1 min-w-0 overflow-y-auto no-scrollbar divide-y-0"
+        className="flex-1 min-w-0 min-h-0 h-full overflow-y-auto no-scrollbar"
       >
-        {children}
+        <div ref={contentRef} className="divide-y-0">
+          {children}
+        </div>
       </div>
 
       {/* Dedicated Left-Panel Vertical Slider Rail (Up / Draggable Thumb / Down) */}
@@ -363,6 +383,7 @@ export const FilterSidebar: React.FC<FilterSidebarProps> = ({
     setFilters,
     categories,
     colors,
+    sizes,
     salesData,
     isSyncingSales,
     stats,
@@ -397,6 +418,7 @@ export const FilterSidebar: React.FC<FilterSidebarProps> = ({
     setOpenSections({
       category: true,
       color: true,
+      size: true,
       sortBy: true,
       status: true,
       salesPeriod: true,
@@ -409,6 +431,7 @@ export const FilterSidebar: React.FC<FilterSidebarProps> = ({
     setOpenSections({
       category: false,
       color: false,
+      size: false,
       sortBy: false,
       status: false,
       salesPeriod: false,
@@ -441,7 +464,7 @@ export const FilterSidebar: React.FC<FilterSidebarProps> = ({
       : null;
 
   const renderSidebarBody = (isDrawer: boolean) => (
-    <div className="flex flex-col h-full bg-[var(--card-bg)]">
+    <div className="flex flex-col flex-1 min-h-0 overflow-hidden bg-[var(--card-bg)]">
       {/* Sidebar Top Controls: Expand All / Collapse All / Reset / Collapse («) */}
       <div className="px-3 py-2.5 border-b border-[var(--table-divider)] flex items-center justify-between gap-1.5 shrink-0 bg-[var(--card-bg)]">
         <div className="flex items-center gap-1">
@@ -514,6 +537,58 @@ export const FilterSidebar: React.FC<FilterSidebarProps> = ({
             {categories.map((cat) => (
               <option key={cat} value={cat}>
                 {cat}
+              </option>
+            ))}
+          </select>
+        </AccordionSection>
+
+        {/* 2. Colour Filter */}
+        <AccordionSection
+          title="Colour"
+          isOpen={openSections.color}
+          onToggle={() => toggleSection('color')}
+          activeBadge={filters.color !== 'all' ? filters.color : null}
+          isHighlighted={filters.color !== 'all'}
+        >
+          <select
+            value={filters.color}
+            onChange={(e) => setFilters((p) => ({ ...p, color: e.target.value }))}
+            className={`w-full rounded-lg px-2.5 py-2 text-[13px] border focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-[var(--accent)] transition-colors duration-150 ${
+              filters.color !== 'all'
+                ? 'bg-[var(--accent-soft)] border-[var(--accent)] text-[var(--accent)] font-medium'
+                : 'bg-[var(--card-bg)] border-[var(--border)] text-[var(--text-primary)] font-normal'
+            }`}
+          >
+            <option value="all">All Colours ({colors.length})</option>
+            {colors.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </select>
+        </AccordionSection>
+
+        {/* 3. Size Filter */}
+        <AccordionSection
+          title="Size"
+          isOpen={openSections.size}
+          onToggle={() => toggleSection('size')}
+          activeBadge={filters.size !== 'all' ? filters.size : null}
+          isHighlighted={filters.size !== 'all'}
+        >
+          <select
+            value={filters.size}
+            onChange={(e) => setFilters((p) => ({ ...p, size: e.target.value }))}
+            className={`w-full rounded-lg px-2.5 py-2 text-[13px] border focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-[var(--accent)] transition-colors duration-150 ${
+              filters.size !== 'all'
+                ? 'bg-[var(--accent-soft)] border-[var(--accent)] text-[var(--accent)] font-medium'
+                : 'bg-[var(--card-bg)] border-[var(--border)] text-[var(--text-primary)] font-normal'
+            }`}
+          >
+            <option value="all">All Sizes ({sizes.length})</option>
+            {sizes.map((s) => (
+              <option key={s} value={s}>
+                {s}
               </option>
             ))}
           </select>
@@ -634,32 +709,6 @@ export const FilterSidebar: React.FC<FilterSidebarProps> = ({
               </div>
             </div>
           </div>
-        </AccordionSection>
-
-        {/* 4. Color Filter */}
-        <AccordionSection
-          title="Color"
-          isOpen={openSections.color}
-          onToggle={() => toggleSection('color')}
-          activeBadge={filters.color !== 'all' ? filters.color : null}
-          isHighlighted={filters.color !== 'all'}
-        >
-          <select
-            value={filters.color}
-            onChange={(e) => setFilters((p) => ({ ...p, color: e.target.value }))}
-            className={`w-full rounded-lg px-2.5 py-2 text-[13px] border focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-[var(--accent)] transition-colors duration-150 ${
-              filters.color !== 'all'
-                ? 'bg-[var(--accent-soft)] border-[var(--accent)] text-[var(--accent)] font-medium'
-                : 'bg-[var(--card-bg)] border-[var(--border)] text-[var(--text-primary)] font-normal'
-            }`}
-          >
-            <option value="all">All Colors ({colors.length})</option>
-            {colors.map((c) => (
-              <option key={c} value={c}>
-                {c}
-              </option>
-            ))}
-          </select>
         </AccordionSection>
 
         {/* 5. Stock Sort */}
@@ -798,11 +847,11 @@ export const FilterSidebar: React.FC<FilterSidebarProps> = ({
         className={`hidden lg:block min-w-0 transition-[opacity,transform] duration-250 ease-in-out ${
           isDesktopOpen
             ? 'opacity-100 translate-x-0 overflow-x-clip'
-            : 'opacity-0 -translate-x-4 pointer-events-none overflow-hidden max-h-[calc(100vh-92px)]'
+            : 'opacity-0 -translate-x-4 pointer-events-none overflow-hidden max-h-[calc(100vh-136px)]'
         }`}
         aria-hidden={!isDesktopOpen}
       >
-        <div className="w-[280px] sticky top-[76px] max-h-[calc(100vh-92px)] bg-[var(--card-bg)] border border-[var(--border)] rounded-xl overflow-hidden flex flex-col">
+        <div className="w-[280px] sticky top-[76px] max-h-[calc(100vh-136px)] bg-[var(--card-bg)] border border-[var(--border)] rounded-xl overflow-hidden flex flex-col">
           {renderSidebarBody(false)}
         </div>
       </aside>
@@ -862,7 +911,7 @@ export const FilterSidebar: React.FC<FilterSidebarProps> = ({
             </button>
           </div>
 
-          <div className="flex-1 min-h-0">{renderSidebarBody(true)}</div>
+          <div className="flex-1 min-h-0 flex flex-col">{renderSidebarBody(true)}</div>
         </aside>
       </div>
     </>

@@ -133,6 +133,7 @@ function DashboardContent() {
       search: '',
       category: 'all',
       color: 'all',
+      size: 'all',
       status: 'all',
       sortBy: 'stock-asc',
       lowStockThreshold: 15,
@@ -164,8 +165,16 @@ function DashboardContent() {
     if (filters.color !== 'all') {
       chips.push({
         key: 'color',
-        label: `Color: ${filters.color}`,
+        label: `Colour: ${filters.color}`,
         onRemove: () => setFilters((p) => ({ ...p, color: 'all' })),
+      });
+    }
+
+    if (filters.size !== 'all') {
+      chips.push({
+        key: 'size',
+        label: `Size: ${filters.size}`,
+        onRemove: () => setFilters((p) => ({ ...p, size: 'all' })),
       });
     }
 
@@ -218,6 +227,7 @@ function DashboardContent() {
     Boolean(filters.search.trim()) ||
     filters.category !== 'all' ||
     filters.color !== 'all' ||
+    filters.size !== 'all' ||
     filters.status !== 'all' ||
     filters.salesPeriod !== '3m' ||
     filters.salesActivity !== 'all' ||

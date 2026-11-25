@@ -64,6 +64,7 @@ export interface FilterOptions {
   search: string;
   category: string;
   color: string;
+  size: string;
   status: StockStatus;
   sortBy:
     | 'sku'
