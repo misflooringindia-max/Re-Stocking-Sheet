@@ -35,12 +35,20 @@ export const STRICT_MONTH_MAP: Record<string, number> = {
 export interface SalesConsumptionIndex {
   bySimplifiedMonths: Record<string, Record<number, number>>;
   availableDateVals: number[];
+  monthlyTotals?: Record<number, number>;
+  recommendedToDateVal?: number;
   minDateVal: number;
   maxDateVal: number;
   totalRows: number;
   qualifiedRows: number;
   uniqueSimplified: number;
   syncedAt: string;
+}
+
+function parseNumericCell(raw: unknown): number {
+  const cleaned = (raw ?? '').toString().trim().replace(/,/g, '');
+  if (!cleaned) return NaN;
+  return parseFloat(cleaned);
 }
 
 export interface CalculatedReorderRow {
@@ -205,6 +213,7 @@ export async function buildConsumptionIndexFromFile(
   onProgress?: (percent: number, processedRows: number) => void
 ): Promise<SalesConsumptionIndex> {
   const bySimplifiedMonths: Record<string, Record<number, number>> = Object.create(null);
+  const monthlyTotals: Record<number, number> = Object.create(null);
   const dateValSet = new Set<number>();
   let totalRows = 0;
   let qualifiedRows = 0;
@@ -248,13 +257,15 @@ export async function buildConsumptionIndexFromFile(
     const key = (cols[7] ?? '').toString().trim();
     if (!key) return;
 
-    let qty = parseFloat((cols[3] ?? '').toString().trim());
+    let qty = parseNumericCell(cols[3]);
     if (isNaN(qty)) qty = 0;
 
     const dateVal = yearNum * 12 + monthNum;
     dateValSet.add(dateVal);
     if (dateVal < minDateVal) minDateVal = dateVal;
     if (dateVal > maxDateVal) maxDateVal = dateVal;
+
+    monthlyTotals[dateVal] = (monthlyTotals[dateVal] || 0) + qty;
 
     let bucket = bySimplifiedMonths[key];
     if (!bucket) {
@@ -297,6 +308,17 @@ export async function buildConsumptionIndexFromFile(
     maxDateVal = 0;
   }
 
+  let recommendedToDateVal = maxDateVal;
+  if (availableDateVals.length >= 2) {
+    const latestDv = availableDateVals[availableDateVals.length - 1];
+    const prevDv = availableDateVals[availableDateVals.length - 2];
+    const latestUnits = monthlyTotals[latestDv] || 0;
+    const prevUnits = monthlyTotals[prevDv] || 0;
+    if (prevUnits > 0 && latestUnits < prevUnits * 0.15) {
+      recommendedToDateVal = prevDv;
+    }
+  }
+
   if (onProgress) {
     onProgress(100, totalRows);
   }
@@ -304,6 +326,8 @@ export async function buildConsumptionIndexFromFile(
   return {
     bySimplifiedMonths,
     availableDateVals,
+    monthlyTotals,
+    recommendedToDateVal,
     minDateVal,
     maxDateVal,
     totalRows,
@@ -401,13 +425,13 @@ export function calculateReorderRows(
       key.length > 0 && Object.prototype.hasOwnProperty.call(salesMap, key);
     const consumption = hasSalesMatch ? salesMap[key] : 0;
 
-    let currentStock = parseFloat((row[3] ?? '').toString().trim());
+    let currentStock = parseNumericCell(row[3]);
     if (isNaN(currentStock)) currentStock = 0;
 
     const leadTimeRaw = (row[5] ?? '').toString().trim();
     const status = (row[7] ?? '').toString().trim();
 
-    let sf = parseFloat((row[11] ?? '').toString().trim());
+    let sf = parseNumericCell(row[11]);
     if (!sf || isNaN(sf)) sf = 1;
 
     const isIgnored =
@@ -424,9 +448,9 @@ export function calculateReorderRows(
       }
     }
 
-    let minStock = parseFloat((row[6] ?? '').toString().trim());
+    let minStock = parseNumericCell(row[6]);
     if (isNaN(minStock)) minStock = 0;
-    let reorderQty = parseFloat((row[4] ?? '').toString().trim());
+    let reorderQty = parseNumericCell(row[4]);
     if (isNaN(reorderQty)) reorderQty = 0;
 
     if (options.enableDownstream) {

@@ -305,7 +305,7 @@ function DashboardContent() {
 
         {/* Left Sidebar + Main Right Content (CSS Grid 280px 1fr <-> 0px 1fr) */}
         <div
-          className={`grid grid-cols-1 items-start transition-[grid-template-columns,gap] duration-250 ease-in-out ${
+          className={`grid grid-cols-1 items-stretch transition-[grid-template-columns,gap] duration-250 ease-in-out ${
             isDesktopSidebarOpen
               ? 'lg:grid-cols-[280px_1fr] lg:gap-5'
               : 'lg:grid-cols-[0px_1fr] lg:gap-0'
@@ -491,6 +491,7 @@ function DashboardContent() {
       <ReorderModal
         isOpen={isReorderOpen}
         onClose={() => setIsReorderOpen(false)}
+        onOpenConsumption={() => setIsConsumptionOpen(true)}
       />
 
       <SyncModal

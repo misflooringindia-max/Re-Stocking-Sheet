@@ -9,14 +9,16 @@ import {
   Copy,
   Check,
   PackagePlus,
+  Calculator,
 } from 'lucide-react';
 
 interface ReorderModalProps {
   isOpen: boolean;
   onClose: () => void;
+  onOpenConsumption?: () => void;
 }
 
-export const ReorderModal: React.FC<ReorderModalProps> = ({ isOpen, onClose }) => {
+export const ReorderModal: React.FC<ReorderModalProps> = ({ isOpen, onClose, onOpenConsumption }) => {
   const { items, filters, batchUpdateStock, getItemSales } = useInventory();
 
   const periodLabel = formatSalesPeriodLabel(filters.salesPeriod);
@@ -325,6 +327,21 @@ export const ReorderModal: React.FC<ReorderModalProps> = ({ isOpen, onClose }) =
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
+            {onOpenConsumption && (
+              <button
+                type="button"
+                onClick={() => {
+                  onClose();
+                  onOpenConsumption();
+                }}
+                className="px-3.5 py-2 rounded-lg bg-[var(--card-bg)] hover:bg-[var(--table-hover)] text-[var(--text-primary)] text-[13px] font-medium flex items-center gap-1.5 transition-colors duration-150 border border-[var(--border)]"
+                title="Calculate consumption & re-order quantities by Month/Year sales"
+              >
+                <Calculator className="w-4 h-4 text-[var(--text-muted)]" />
+                <span>Sales Consumption Calc</span>
+              </button>
+            )}
+
             {/* Copy for Google Sheet */}
             <button
               onClick={handleCopyTsv}

@@ -194,7 +194,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               title="Sales consumption & re-order formula calculator"
             >
               <Calculator className="w-4 h-4 text-[var(--text-muted)]" />
-              <span className="hidden xl:inline">Consumption Calc</span>
+              <span className="hidden lg:inline">Sales Calc</span>
             </button>
 
             {/* Google Sheet Link & Export Modal Button */}

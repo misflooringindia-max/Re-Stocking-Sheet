@@ -98,6 +98,7 @@ interface InventoryContextType {
 }
 
 const DEFAULT_THRESHOLD = 15;
+const SALES_SUMMARY_SCHEMA_VERSION = 2;
 const SHEET_URL_STORAGE_KEY = 'stocksync_published_sheet_url';
 const SALES_URL_STORAGE_KEY = 'stocksync_sales_sheet_url';
 const AUTO_SYNC_STORAGE_KEY = 'stocksync_auto_sync_enabled';
@@ -526,7 +527,8 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           loadSalesSummaryFromDb(),
         ]);
 
-        if (isMounted && cachedSales && cachedSales.bySimplified) {
+        const hasFreshSchema = cachedSales?.schemaVersion === SALES_SUMMARY_SCHEMA_VERSION;
+        if (isMounted && cachedSales && cachedSales.bySimplified && hasFreshSchema) {
           setSalesData(cachedSales);
           hasCachedSales = true;
         }
@@ -562,7 +564,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
       // Start sales sync non-blocking in background so UI opens quickly
       if (shouldAutoSyncSales && isMounted) {
-        syncSalesSheet(activeSalesUrl, { forceRefresh: false }).catch(() => {});
+        syncSalesSheet(activeSalesUrl, { forceRefresh: !hasCachedSales }).catch(() => {});
       }
 
       if (shouldAutoSyncStock && isMounted) {

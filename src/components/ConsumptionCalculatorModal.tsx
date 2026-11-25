@@ -51,6 +51,8 @@ export const ConsumptionCalculatorModal: React.FC<ConsumptionCalculatorModalProp
 
   // Source A: Sales_Data state
   const [salesMode, setSalesMode] = useState<SalesSourceMode>('live');
+  const [salesUrlInput, setSalesUrlInput] = useState<string>(connectedSalesUrl);
+  const [loadedSalesUrl, setLoadedSalesUrl] = useState<string>('');
   const [salesIndex, setSalesIndex] = useState<SalesConsumptionIndex | null>(null);
   const [salesFileName, setSalesFileName] = useState<string>('');
   const [isLoadingSales, setIsLoadingSales] = useState<boolean>(false);
@@ -75,17 +77,30 @@ export const ConsumptionCalculatorModal: React.FC<ConsumptionCalculatorModalProp
 
   // Inventory-to-ReOrder defaults (when building from StockSync items)
   const [defaultLeadTime, setDefaultLeadTime] = useState<string>('15 Days');
-  const [defaultSafetyFactor, setDefaultSafetyFactor] = useState<number>(1);
+  const [defaultSafetyFactorInput, setDefaultSafetyFactorInput] = useState<string>('1');
+  const defaultSafetyFactor = useMemo(() => {
+    const n = parseFloat(defaultSafetyFactorInput);
+    return !n || isNaN(n) || n <= 0 ? 1 : n;
+  }, [defaultSafetyFactorInput]);
 
   // Step 4: Downstream options
   const [enableDownstream, setEnableDownstream] = useState<boolean>(true);
-  const [plannedWeeks, setPlannedWeeks] = useState<number>(8);
+  const [plannedWeeksInput, setPlannedWeeksInput] = useState<string>('8');
+  const plannedWeeks = useMemo(() => {
+    const n = parseFloat(plannedWeeksInput);
+    return isNaN(n) || n < 0 ? 0 : n;
+  }, [plannedWeeksInput]);
 
   // Preview filters & pagination
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [rowFilter, setRowFilter] = useState<RowFilter>('all');
   const [visibleLimit, setVisibleLimit] = useState<number>(100);
   const [copiedTarget, setCopiedTarget] = useState<string | null>(null);
+
+  // Sync URL input when connectedSalesUrl changes from SyncModal
+  useEffect(() => {
+    setSalesUrlInput(connectedSalesUrl);
+  }, [connectedSalesUrl]);
 
   // Apply preset helper relative to loaded Sales_Data date span
   const applyPresetRange = (idx: SalesConsumptionIndex, monthsBack: number | 'all') => {
@@ -99,7 +114,7 @@ export const ConsumptionCalculatorModal: React.FC<ConsumptionCalculatorModalProp
       setToYear(end.year);
       return;
     }
-    const endDv = idx.maxDateVal;
+    const endDv = idx.recommendedToDateVal || idx.maxDateVal;
     const startDv = Math.max(idx.minDateVal, endDv - (monthsBack - 1));
     const start = monthYearFromDateVal(startDv);
     const end = monthYearFromDateVal(endDv);
@@ -109,12 +124,17 @@ export const ConsumptionCalculatorModal: React.FC<ConsumptionCalculatorModalProp
     setToYear(end.year);
   };
 
-  // Fetch live Sales_Data index when modal opens
-  const fetchLiveSalesIndex = async (forceRefresh = false) => {
+  // Fetch live Sales_Data index when modal opens or URL updates
+  const fetchLiveSalesIndex = async (forceRefresh = false, overrideUrl?: string) => {
+    const rawTarget = (overrideUrl ?? salesUrlInput ?? connectedSalesUrl).trim();
+    if (!rawTarget) {
+      setSalesError('Please enter a Sales_Data Google Sheet URL.');
+      return;
+    }
     try {
       setIsLoadingSales(true);
       setSalesError(null);
-      const csvUrl = convertGoogleSheetUrlToCsv(connectedSalesUrl) || connectedSalesUrl;
+      const csvUrl = convertGoogleSheetUrlToCsv(rawTarget) || rawTarget;
       const url = `/api/sales-consumption-index?url=${encodeURIComponent(csvUrl)}${
         forceRefresh ? '&refresh=1' : ''
       }&_t=${Date.now()}`;
@@ -126,7 +146,8 @@ export const ConsumptionCalculatorModal: React.FC<ConsumptionCalculatorModalProp
       }
       const data: SalesConsumptionIndex = await res.json();
       setSalesIndex(data);
-      if (!rangeInitialized && data.maxDateVal > 0) {
+      setLoadedSalesUrl(rawTarget);
+      if ((!rangeInitialized || forceRefresh) && data.maxDateVal > 0) {
         applyPresetRange(data, 6);
         setRangeInitialized(true);
       }
@@ -139,10 +160,14 @@ export const ConsumptionCalculatorModal: React.FC<ConsumptionCalculatorModalProp
 
   useEffect(() => {
     if (!isOpen) return;
-    if (salesMode === 'live' && !salesIndex && !isLoadingSales) {
-      fetchLiveSalesIndex(false);
+    if (
+      salesMode === 'live' &&
+      !isLoadingSales &&
+      (!salesIndex || loadedSalesUrl !== connectedSalesUrl)
+    ) {
+      fetchLiveSalesIndex(false, connectedSalesUrl);
     }
-  }, [isOpen, salesMode]);
+  }, [isOpen, salesMode, connectedSalesUrl]);
 
   // Keep Re-Order table seeded from StockSync inventory if user is in 'inventory' mode
   useEffect(() => {
@@ -201,13 +226,18 @@ export const ConsumptionCalculatorModal: React.FC<ConsumptionCalculatorModalProp
   // Summary KPIs
   const summaryStats = useMemo(() => {
     let matchedCount = 0;
+    let unmatchedCount = 0;
     let totalConsumption = 0;
     let reorderItemsCount = 0;
     let totalReorderUnits = 0;
     let ignoredCount = 0;
 
     for (const r of calculatedRows) {
-      if (r.hasSalesMatch) matchedCount++;
+      if (r.hasSalesMatch) {
+        matchedCount++;
+      } else {
+        unmatchedCount++;
+      }
       totalConsumption += r.consumption;
       if (r.isIgnored) ignoredCount++;
       if (r.reorderQty > 0) {
@@ -219,6 +249,7 @@ export const ConsumptionCalculatorModal: React.FC<ConsumptionCalculatorModalProp
     return {
       totalRows: calculatedRows.length,
       matchedCount,
+      unmatchedCount,
       totalConsumption,
       reorderItemsCount,
       totalReorderUnits,
@@ -231,7 +262,7 @@ export const ConsumptionCalculatorModal: React.FC<ConsumptionCalculatorModalProp
     const q = searchQuery.trim().toLowerCase();
     return calculatedRows.filter((r) => {
       if (rowFilter === 'reorder' && r.reorderQty <= 0) return false;
-      if (rowFilter === 'matched' && r.consumption <= 0) return false;
+      if (rowFilter === 'matched' && !r.hasSalesMatch) return false;
       if (rowFilter === 'unmatched' && r.hasSalesMatch) return false;
       if (rowFilter === 'ignored' && !r.isIgnored) return false;
       if (q) {
@@ -424,7 +455,7 @@ export const ConsumptionCalculatorModal: React.FC<ConsumptionCalculatorModalProp
                     type="button"
                     onClick={() => {
                       setSalesMode('live');
-                      fetchLiveSalesIndex(false);
+                      fetchLiveSalesIndex(false, salesUrlInput);
                     }}
                     className={`px-2.5 py-1 rounded-[6px] border transition-colors duration-150 ${
                       salesMode === 'live'
@@ -451,6 +482,27 @@ export const ConsumptionCalculatorModal: React.FC<ConsumptionCalculatorModalProp
                   </label>
                 </div>
               </div>
+
+              {/* Optional Sales_Data URL Input in Live mode */}
+              {salesMode === 'live' && (
+                <div className="flex items-center gap-1.5 text-[12px]">
+                  <input
+                    type="text"
+                    value={salesUrlInput}
+                    onChange={(e) => setSalesUrlInput(e.target.value)}
+                    placeholder="Sales_Data Google Sheet CSV/share URL"
+                    className="flex-1 bg-[var(--card-bg)] border border-[var(--border)] rounded-lg px-2.5 py-1.5 text-[12px] font-mono text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-[var(--accent)]"
+                  />
+                  <button
+                    type="button"
+                    disabled={isLoadingSales}
+                    onClick={() => fetchLiveSalesIndex(true, salesUrlInput)}
+                    className="px-2.5 py-1.5 rounded-lg bg-[var(--card-bg)] border border-[var(--border)] hover:bg-[var(--table-hover)] text-[var(--text-primary)] text-[12px] font-medium disabled:opacity-40 transition-colors duration-150 shrink-0"
+                  >
+                    Load
+                  </button>
+                </div>
+              )}
 
               {/* Sales Status Line */}
               <div className="p-2.5 rounded-lg bg-[var(--surface-subtle)] border border-[var(--border)] flex flex-wrap items-center justify-between gap-2 text-[12px]">
@@ -483,7 +535,7 @@ export const ConsumptionCalculatorModal: React.FC<ConsumptionCalculatorModalProp
                   <button
                     type="button"
                     disabled={isLoadingSales}
-                    onClick={() => fetchLiveSalesIndex(true)}
+                    onClick={() => fetchLiveSalesIndex(true, salesUrlInput)}
                     className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-[var(--card-bg)] border border-[var(--border)] hover:bg-[var(--table-hover)] text-[11px] font-medium text-[var(--text-primary)] disabled:opacity-40 transition-colors duration-150"
                   >
                     <RefreshCw className={`w-3 h-3 text-[var(--text-muted)] ${isLoadingSales ? 'animate-spin' : ''}`} />
@@ -595,6 +647,12 @@ export const ConsumptionCalculatorModal: React.FC<ConsumptionCalculatorModalProp
                   units ({salesMapStats.uniqueKeys.toLocaleString()} SKUs)
                 </span>
               </div>
+              {fromDateVal > toDateVal && (
+                <div className="p-2 rounded-lg bg-[var(--status-low-bg)] text-[var(--status-low-text)] text-[12px] flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  <span>"From" month is after "To" month. Please adjust the range so From ≤ To.</span>
+                </div>
+              )}
             </div>
 
             {/* Card 2: Source B (Re-Order_Data) & Step 4 Downstream Settings */}
@@ -660,8 +718,9 @@ export const ConsumptionCalculatorModal: React.FC<ConsumptionCalculatorModalProp
                       type="number"
                       step="0.1"
                       min="0"
-                      value={defaultSafetyFactor}
-                      onChange={(e) => setDefaultSafetyFactor(parseFloat(e.target.value) || 1)}
+                      value={defaultSafetyFactorInput}
+                      onChange={(e) => setDefaultSafetyFactorInput(e.target.value)}
+                      onBlur={() => setDefaultSafetyFactorInput(String(defaultSafetyFactor))}
                       className="w-full bg-[var(--card-bg)] border border-[var(--border)] rounded-lg px-2.5 py-1.5 text-[13px] font-mono text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-[var(--accent)]"
                     />
                   </div>
@@ -754,7 +813,7 @@ export const ConsumptionCalculatorModal: React.FC<ConsumptionCalculatorModalProp
                       <button
                         key={w}
                         type="button"
-                        onClick={() => setPlannedWeeks(w)}
+                        onClick={() => setPlannedWeeksInput(String(w))}
                         className={`px-2 py-1 rounded-lg border text-[12px] transition-colors duration-150 ${
                           plannedWeeks === w
                             ? 'bg-[var(--accent-soft)] text-[var(--accent)] border-[var(--accent)] font-medium'
@@ -768,8 +827,9 @@ export const ConsumptionCalculatorModal: React.FC<ConsumptionCalculatorModalProp
                       type="number"
                       min="0"
                       step="1"
-                      value={plannedWeeks}
-                      onChange={(e) => setPlannedWeeks(parseFloat(e.target.value) || 0)}
+                      value={plannedWeeksInput}
+                      onChange={(e) => setPlannedWeeksInput(e.target.value)}
+                      onBlur={() => setPlannedWeeksInput(String(plannedWeeks))}
                       className="w-16 bg-[var(--card-bg)] border border-[var(--border)] rounded-lg px-2 py-1 text-[12px] font-mono text-center text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-[var(--accent)]"
                     />
                   </div>
@@ -810,8 +870,8 @@ export const ConsumptionCalculatorModal: React.FC<ConsumptionCalculatorModalProp
               {[
                 { id: 'all', label: `All (${calculatedRows.length.toLocaleString()})` },
                 { id: 'reorder', label: `Re-Order > 0 (${summaryStats.reorderItemsCount.toLocaleString()})` },
-                { id: 'matched', label: `Matched > 0 (${summaryStats.matchedCount.toLocaleString()})` },
-                { id: 'unmatched', label: 'Unmatched (0)' },
+                { id: 'matched', label: `Matched (${summaryStats.matchedCount.toLocaleString()})` },
+                { id: 'unmatched', label: `Unmatched (${summaryStats.unmatchedCount.toLocaleString()})` },
                 { id: 'ignored', label: `Ignored (${summaryStats.ignoredCount.toLocaleString()})` },
               ].map((pill) => {
                 const active = rowFilter === pill.id;

@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useInventory } from '../context/InventoryContext';
 import { formatSalesPeriodLabel } from '../utils/csvHelper';
 import { SalesPeriod, StockStatus } from '../types/inventory';
 import {
+  ChevronUp,
   ChevronDown,
   RotateCcw,
   X,
@@ -119,6 +120,222 @@ const AccordionSection: React.FC<AccordionSectionProps> = ({
         <div className="overflow-hidden">
           <div className="px-3.5 pb-3 pt-1">{children}</div>
         </div>
+      </div>
+    </div>
+  );
+};
+
+interface SidebarScrollAreaProps {
+  children: React.ReactNode;
+}
+
+const SidebarScrollArea: React.FC<SidebarScrollAreaProps> = ({ children }) => {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const trackRef = useRef<HTMLDivElement>(null);
+  const thumbRef = useRef<HTMLDivElement>(null);
+  const dragStateRef = useRef<{ startY: number; startScrollTop: number } | null>(null);
+
+  const [isDragging, setIsDragging] = useState(false);
+  const [scrollBounds, setScrollBounds] = useState({
+    canScroll: false,
+    atTop: true,
+    atBottom: true,
+  });
+
+  const syncThumb = useCallback(() => {
+    const el = scrollRef.current;
+    const track = trackRef.current;
+    const thumb = thumbRef.current;
+    if (!el || !track || !thumb) return;
+
+    const { scrollTop, scrollHeight, clientHeight } = el;
+    const maxScroll = Math.max(0, scrollHeight - clientHeight);
+    const canScroll = maxScroll > 2;
+    const trackHeight = track.clientHeight;
+
+    if (!canScroll || trackHeight <= 0) {
+      thumb.style.height = `${Math.max(24, trackHeight)}px`;
+      thumb.style.transform = 'translateY(0px)';
+    } else {
+      const ratio = clientHeight / scrollHeight;
+      const thumbHeight = Math.max(28, Math.round(trackHeight * ratio));
+      const maxThumbTop = Math.max(0, trackHeight - thumbHeight);
+      const thumbTop = Math.round((scrollTop / maxScroll) * maxThumbTop);
+      thumb.style.height = `${thumbHeight}px`;
+      thumb.style.transform = `translateY(${thumbTop}px)`;
+    }
+
+    setScrollBounds((prev) => {
+      const atTop = scrollTop <= 1;
+      const atBottom = scrollTop >= maxScroll - 1;
+      if (
+        prev.canScroll === canScroll &&
+        prev.atTop === atTop &&
+        prev.atBottom === atBottom
+      ) {
+        return prev;
+      }
+      return { canScroll, atTop, atBottom };
+    });
+  }, []);
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    const track = trackRef.current;
+    if (!el) return;
+
+    syncThumb();
+
+    const resizeObserver = new ResizeObserver(() => {
+      syncThumb();
+    });
+    resizeObserver.observe(el);
+    if (track) resizeObserver.observe(track);
+    if (el.firstElementChild) resizeObserver.observe(el.firstElementChild);
+
+    const mutationObserver = new MutationObserver(() => {
+      requestAnimationFrame(syncThumb);
+    });
+    mutationObserver.observe(el, { childList: true, subtree: true, attributes: true });
+
+    const onTransitionEnd = () => syncThumb();
+    el.addEventListener('transitionend', onTransitionEnd);
+
+    return () => {
+      resizeObserver.disconnect();
+      mutationObserver.disconnect();
+      el.removeEventListener('transitionend', onTransitionEnd);
+    };
+  }, [syncThumb]);
+
+  const scrollByStep = (delta: number) => {
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollBy({ top: delta, behavior: 'smooth' });
+  };
+
+  const handleTrackPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    const el = scrollRef.current;
+    const track = trackRef.current;
+    const thumb = thumbRef.current;
+    if (!el || !track || !thumb) return;
+
+    const maxScroll = el.scrollHeight - el.clientHeight;
+    if (maxScroll <= 0) return;
+
+    e.preventDefault();
+    track.setPointerCapture(e.pointerId);
+    setIsDragging(true);
+
+    const thumbRect = thumb.getBoundingClientRect();
+    const trackRect = track.getBoundingClientRect();
+    const clickedOnThumb = e.clientY >= thumbRect.top && e.clientY <= thumbRect.bottom;
+
+    if (!clickedOnThumb) {
+      const thumbHeight = thumb.offsetHeight;
+      const maxThumbTop = Math.max(1, trackRect.height - thumbHeight);
+      const targetThumbTop = Math.max(
+        0,
+        Math.min(maxThumbTop, e.clientY - trackRect.top - thumbHeight / 2)
+      );
+      el.scrollTop = (targetThumbTop / maxThumbTop) * maxScroll;
+    }
+
+    dragStateRef.current = {
+      startY: e.clientY,
+      startScrollTop: el.scrollTop,
+    };
+  };
+
+  const handleTrackPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const drag = dragStateRef.current;
+    const el = scrollRef.current;
+    const track = trackRef.current;
+    const thumb = thumbRef.current;
+    if (!drag || !el || !track || !thumb) return;
+
+    const maxScroll = el.scrollHeight - el.clientHeight;
+    const maxThumbTop = Math.max(1, track.clientHeight - thumb.offsetHeight);
+    if (maxScroll <= 0) return;
+
+    const deltaY = e.clientY - drag.startY;
+    const deltaScroll = (deltaY / maxThumbTop) * maxScroll;
+    el.scrollTop = Math.max(0, Math.min(maxScroll, drag.startScrollTop + deltaScroll));
+  };
+
+  const handleTrackPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!dragStateRef.current) return;
+    dragStateRef.current = null;
+    setIsDragging(false);
+    try {
+      trackRef.current?.releasePointerCapture(e.pointerId);
+    } catch {
+      // ignore if already released
+    }
+  };
+
+  return (
+    <div className="flex-1 min-h-0 flex overflow-hidden">
+      {/* Scrollable Filter Sections */}
+      <div
+        ref={scrollRef}
+        onScroll={syncThumb}
+        className="flex-1 min-w-0 overflow-y-auto no-scrollbar divide-y-0"
+      >
+        {children}
+      </div>
+
+      {/* Dedicated Left-Panel Vertical Slider Rail (Up / Draggable Thumb / Down) */}
+      <div
+        className="w-[18px] shrink-0 border-l border-[var(--table-divider)] bg-[var(--table-header-bg)] flex flex-col items-center py-1 select-none"
+        aria-label="Filter panel vertical scroll slider"
+      >
+        <button
+          type="button"
+          onClick={() => scrollByStep(-120)}
+          disabled={!scrollBounds.canScroll || scrollBounds.atTop}
+          title="Move panel up"
+          aria-label="Move filter panel up"
+          className="w-4 h-4 flex items-center justify-center rounded text-[var(--text-muted)] hover:text-[var(--accent)] hover:bg-[var(--card-bg)] disabled:opacity-30 disabled:pointer-events-none transition-colors duration-150"
+        >
+          <ChevronUp className="w-3.5 h-3.5" />
+        </button>
+
+        <div
+          ref={trackRef}
+          onPointerDown={handleTrackPointerDown}
+          onPointerMove={handleTrackPointerMove}
+          onPointerUp={handleTrackPointerUp}
+          onPointerCancel={handleTrackPointerUp}
+          title="Drag slider up or down to scroll filters"
+          className="flex-1 w-full relative my-1 cursor-pointer touch-none flex justify-center"
+        >
+          {/* Subtle Track Line */}
+          <div className="w-[3px] h-full rounded-full bg-[var(--border)]" />
+
+          {/* Draggable Slider Thumb */}
+          <div
+            ref={thumbRef}
+            className={`absolute top-0 w-[8px] rounded-full transition-colors duration-150 ${
+              !scrollBounds.canScroll
+                ? 'bg-[#D0D4DC]'
+                : isDragging
+                ? 'bg-[var(--accent)]'
+                : 'bg-[#9AA1AD] hover:bg-[var(--accent)]'
+            }`}
+          />
+        </div>
+
+        <button
+          type="button"
+          onClick={() => scrollByStep(120)}
+          disabled={!scrollBounds.canScroll || scrollBounds.atBottom}
+          title="Move panel down"
+          aria-label="Move filter panel down"
+          className="w-4 h-4 flex items-center justify-center rounded text-[var(--text-muted)] hover:text-[var(--accent)] hover:bg-[var(--card-bg)] disabled:opacity-30 disabled:pointer-events-none transition-colors duration-150"
+        >
+          <ChevronDown className="w-3.5 h-3.5" />
+        </button>
       </div>
     </div>
   );
@@ -274,8 +491,8 @@ export const FilterSidebar: React.FC<FilterSidebarProps> = ({
         </div>
       </div>
 
-      {/* Scrollable Accordion Filter List */}
-      <div className="flex-1 overflow-y-auto divide-y-0">
+      {/* Scrollable Accordion Filter List + Vertical Slider */}
+      <SidebarScrollArea>
         {/* 1. Category Filter */}
         <AccordionSection
           title="Category"
@@ -386,11 +603,35 @@ export const FilterSidebar: React.FC<FilterSidebarProps> = ({
               </select>
             )}
 
-            <div className="text-[11px] text-[var(--text-muted)] pt-0.5 flex items-center justify-between">
-              <span>{activePeriodLabel} filtered total:</span>
-              <span className="font-mono font-medium text-[var(--text-primary)]">
-                {isSyncingSales ? 'Loading...' : `${stats.filteredSalesTotal.toLocaleString()} units`}
-              </span>
+            <div className="text-[11px] text-[var(--text-muted)] pt-0.5 space-y-1">
+              {salesData?.windowLabels &&
+                (filters.salesPeriod === '1m' ||
+                  filters.salesPeriod === '3m' ||
+                  filters.salesPeriod === '6m' ||
+                  filters.salesPeriod === '12m') && (
+                  <div className="flex items-center justify-between">
+                    <span>Calendar span:</span>
+                    <span className="font-medium text-[var(--text-primary)]">
+                      {
+                        salesData.windowLabels[
+                          filters.salesPeriod === '1m'
+                            ? 'm1'
+                            : filters.salesPeriod === '3m'
+                            ? 'm3'
+                            : filters.salesPeriod === '6m'
+                            ? 'm6'
+                            : 'm12'
+                        ]
+                      }
+                    </span>
+                  </div>
+                )}
+              <div className="flex items-center justify-between">
+                <span>{activePeriodLabel} filtered total:</span>
+                <span className="font-mono font-medium text-[var(--text-primary)]">
+                  {isSyncingSales ? 'Loading...' : `${stats.filteredSalesTotal.toLocaleString()} units`}
+                </span>
+              </div>
             </div>
           </div>
         </AccordionSection>
@@ -514,7 +755,7 @@ export const FilterSidebar: React.FC<FilterSidebarProps> = ({
             </div>
           </div>
         </AccordionSection>
-      </div>
+      </SidebarScrollArea>
 
       {/* Bottom Footer: Reset on Desktop, Apply + Reset on Mobile/Tablet Drawer */}
       {isDrawer ? (
@@ -554,10 +795,10 @@ export const FilterSidebar: React.FC<FilterSidebarProps> = ({
     <>
       {/* Desktop Sticky Collapsible Left Sidebar (>= lg) inside CSS Grid 280px <-> 0px column */}
       <aside
-        className={`hidden lg:block min-w-0 overflow-hidden transition-[opacity,transform] duration-250 ease-in-out ${
+        className={`hidden lg:block min-w-0 transition-[opacity,transform] duration-250 ease-in-out ${
           isDesktopOpen
-            ? 'opacity-100 translate-x-0'
-            : 'opacity-0 -translate-x-4 pointer-events-none'
+            ? 'opacity-100 translate-x-0 overflow-x-clip'
+            : 'opacity-0 -translate-x-4 pointer-events-none overflow-hidden max-h-[calc(100vh-92px)]'
         }`}
         aria-hidden={!isDesktopOpen}
       >

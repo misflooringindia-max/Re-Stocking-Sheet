@@ -51,6 +51,7 @@ interface SalesAggregationRecord {
 }
 
 interface SalesSummaryPayload {
+  schemaVersion: number;
   bySimplified: Record<string, SalesAggregationRecord>;
   totalRows: number;
   totalUnits: number;
@@ -58,11 +59,18 @@ interface SalesSummaryPayload {
   minDate: string;
   maxDate: string;
   availableMonths: string[];
+  windowLabels: {
+    m1: string;
+    m3: string;
+    m6: string;
+    m12: string;
+  };
   syncedAt: string;
 }
 
 const salesCache = new Map<string, { timestamp: number; data: SalesSummaryPayload }>();
 const SALES_CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+const SALES_SUMMARY_SCHEMA_VERSION = 2;
 
 const STRICT_MONTH_MAP: Record<string, number> = {
   January: 1,
@@ -79,9 +87,46 @@ const STRICT_MONTH_MAP: Record<string, number> = {
   December: 12,
 };
 
+const SHORT_MONTH_NAMES = [
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec',
+];
+
+function formatDateValShort(dv: number): string {
+  if (!dv) return '';
+  const m = ((dv - 1) % 12 + 12) % 12;
+  const y = Math.floor((dv - 1) / 12);
+  return `${SHORT_MONTH_NAMES[m] || 'Jan'} ${y}`;
+}
+
+function formatDateValSpan(fromDv: number, toDv: number): string {
+  if (!fromDv || !toDv) return '';
+  if (fromDv === toDv) return formatDateValShort(toDv);
+  return `${formatDateValShort(fromDv)}–${formatDateValShort(toDv)}`;
+}
+
+function parseNumericQty(raw: string | undefined): number {
+  const cleaned = (raw ?? '').toString().trim().replace(/,/g, '');
+  if (!cleaned) return 0;
+  const val = parseFloat(cleaned);
+  return Number.isFinite(val) ? val : 0;
+}
+
 interface SalesConsumptionIndexPayload {
   bySimplifiedMonths: Record<string, Record<number, number>>;
   availableDateVals: number[];
+  monthlyTotals: Record<number, number>;
+  recommendedToDateVal: number;
   minDateVal: number;
   maxDateVal: number;
   totalRows: number;
@@ -106,8 +151,9 @@ function buildSalesConsumptionIndex(csvText: string): SalesConsumptionIndexPaylo
   // Index 5 (Col F): Month (January..December)
   // Index 6 (Col G): Year (integer)
   // Index 7 (Col H): Simplified (trimmed, case-sensitive)
-  // Do NOT parse Col A (Date), do NOT dedup Order Id, do NOT read ReturnImport.
+  // Do NOT parse or filter by Col A (Date), do NOT dedup Order Id, do NOT read ReturnImport.
   const bySimplifiedMonths: Record<string, Record<number, number>> = Object.create(null);
+  const monthlyTotals: Record<number, number> = Object.create(null);
   const dateValSet = new Set<number>();
   let totalRows = 0;
   let qualifiedRows = 0;
@@ -135,13 +181,14 @@ function buildSalesConsumptionIndex(csvText: string): SalesConsumptionIndexPaylo
     const key = (cols[7] ?? '').toString().trim();
     if (!key) continue;
 
-    let qty = parseFloat((cols[3] ?? '').toString().trim());
-    if (isNaN(qty)) qty = 0;
+    const qty = parseNumericQty(cols[3]);
 
     const dateVal = yearNum * 12 + monthNum;
     dateValSet.add(dateVal);
     if (dateVal < minDateVal) minDateVal = dateVal;
     if (dateVal > maxDateVal) maxDateVal = dateVal;
+
+    monthlyTotals[dateVal] = (monthlyTotals[dateVal] || 0) + qty;
 
     let bucket = bySimplifiedMonths[key];
     if (!bucket) {
@@ -158,9 +205,22 @@ function buildSalesConsumptionIndex(csvText: string): SalesConsumptionIndexPaylo
     maxDateVal = 0;
   }
 
+  let recommendedToDateVal = maxDateVal;
+  if (availableDateVals.length >= 2) {
+    const latestDv = availableDateVals[availableDateVals.length - 1];
+    const prevDv = availableDateVals[availableDateVals.length - 2];
+    const latestUnits = monthlyTotals[latestDv] || 0;
+    const prevUnits = monthlyTotals[prevDv] || 0;
+    if (prevUnits > 0 && latestUnits < prevUnits * 0.15) {
+      recommendedToDateVal = prevDv;
+    }
+  }
+
   return {
     bySimplifiedMonths,
     availableDateVals,
+    monthlyTotals,
+    recommendedToDateVal,
     minDateVal,
     maxDateVal,
     totalRows,
@@ -288,12 +348,11 @@ function aggregateSalesCsv(csvText: string): SalesSummaryPayload {
   const effYearIdx = yearIdx >= 0 ? yearIdx : 6;
   const effSimplifiedIdx = simplifiedIdx >= 0 ? simplifiedIdx : 7;
 
-  // Compact row storage for two-pass cutoff calculation (supports exact windows relative to maxDate)
   interface CompactSaleRow {
     key: string;
     displayName: string;
     qty: number;
-    dateMs: number | null;
+    dateVal: number | null;
     ym: string;
     portal: string;
   }
@@ -303,6 +362,8 @@ function aggregateSalesCsv(csvText: string): SalesSummaryPayload {
   let maxDateMs = -Infinity;
   let totalUnits = 0;
   const monthSet = new Set<string>();
+  const dateValUnits: Record<number, number> = Object.create(null);
+  const dateValDays: Record<number, Set<string>> = Object.create(null);
 
   for (let i = headerIdx + 1; i < lines.length; i++) {
     const line = lines[i];
@@ -314,30 +375,43 @@ function aggregateSalesCsv(csvText: string): SalesSummaryPayload {
     const rawSimplified = (cols[effSimplifiedIdx] || '').trim();
     if (!rawSimplified) continue;
 
-    const qty = Math.max(0, parseInt((cols[effQtyIdx] || '0').trim(), 10) || 0);
-    if (qty === 0) continue;
+    const qty = Math.max(0, parseNumericQty(cols[effQtyIdx]));
 
     const rawDate = cols[effDateIdx] || '';
     const rawMonth = cols[effMonthIdx] || '';
     const rawYear = cols[effYearIdx] || '';
-    const dateMs = parseSalesDateMs(rawDate, rawMonth, rawYear);
 
+    // Primary Month/Year calendar math per Sales Consumption specification
+    let dateVal: number | null = null;
     let ym = '';
+    const mZero = MONTH_MAP[rawMonth.trim().toLowerCase()];
+    const yr = parseInt(rawYear.trim(), 10);
+    if (mZero !== undefined && !isNaN(yr) && yr >= 2000 && yr <= 2100) {
+      const mNum = mZero + 1;
+      dateVal = yr * 12 + mNum;
+      ym = `${yr}-${String(mNum).padStart(2, '0')}`;
+      monthSet.add(ym);
+    }
+
+    // Track minDate / maxDate for display metadata & day count per month
+    const dateMs = parseSalesDateMs(rawDate, rawMonth, rawYear);
     if (dateMs !== null) {
       if (dateMs < minDateMs) minDateMs = dateMs;
       if (dateMs > maxDateMs) maxDateMs = dateMs;
-      const d = new Date(dateMs);
-      const y = d.getUTCFullYear();
-      const m = String(d.getUTCMonth() + 1).padStart(2, '0');
-      ym = `${y}-${m}`;
-      monthSet.add(ym);
-    } else {
-      const mNum = MONTH_MAP[rawMonth.trim().toLowerCase()];
-      const yr = parseInt(rawYear.trim(), 10);
-      if (mNum !== undefined && yr >= 2000 && yr <= 2100) {
-        ym = `${yr}-${String(mNum + 1).padStart(2, '0')}`;
+      if (dateVal === null) {
+        const d = new Date(dateMs);
+        const y = d.getUTCFullYear();
+        const mNum = d.getUTCMonth() + 1;
+        dateVal = y * 12 + mNum;
+        ym = `${y}-${String(mNum).padStart(2, '0')}`;
         monthSet.add(ym);
       }
+      if (!dateValDays[dateVal]) dateValDays[dateVal] = new Set();
+      dateValDays[dateVal].add(new Date(dateMs).toISOString().slice(0, 10));
+    }
+
+    if (dateVal !== null) {
+      dateValUnits[dateVal] = (dateValUnits[dateVal] || 0) + qty;
     }
 
     const portal = (cols[effPortalIdx] || '').trim() || 'Other';
@@ -347,7 +421,7 @@ function aggregateSalesCsv(csvText: string): SalesSummaryPayload {
       key: rawSimplified.toLowerCase(),
       displayName: rawSimplified,
       qty,
-      dateMs,
+      dateVal,
       ym,
       portal,
     });
@@ -358,11 +432,29 @@ function aggregateSalesCsv(csvText: string): SalesSummaryPayload {
     minDateMs = maxDateMs;
   }
 
-  const DAY_MS = 86400000;
-  const cutoff1m = maxDateMs - 30 * DAY_MS;
-  const cutoff3m = maxDateMs - 90 * DAY_MS;
-  const cutoff6m = maxDateMs - 180 * DAY_MS;
-  const cutoff12m = maxDateMs - 365 * DAY_MS;
+  // Determine anchor calendar month for rolling 1M / 3M / 6M / 12M windows.
+  // If the newest month is only a tiny partial-month stub (e.g., 1 day with <15% of prior month volume),
+  // anchor rolling windows at the latest full month so 1M/3M/6M/12M don't undercount or zero out items.
+  const sortedDateVals = Object.keys(dateValUnits)
+    .map(Number)
+    .sort((a, b) => a - b);
+  let anchorDateVal = sortedDateVals.length > 0 ? sortedDateVals[sortedDateVals.length - 1] : 0;
+
+  if (sortedDateVals.length >= 2) {
+    const latestDv = sortedDateVals[sortedDateVals.length - 1];
+    const prevDv = sortedDateVals[sortedDateVals.length - 2];
+    const latestUnits = dateValUnits[latestDv] || 0;
+    const prevUnits = dateValUnits[prevDv] || 0;
+    const latestDays = dateValDays[latestDv]?.size || 0;
+    if (prevUnits > 0 && latestUnits < prevUnits * 0.15 && latestDays <= 5) {
+      anchorDateVal = prevDv;
+    }
+  }
+
+  const from1m = anchorDateVal;
+  const from3m = anchorDateVal ? anchorDateVal - 2 : 0;
+  const from6m = anchorDateVal ? anchorDateVal - 5 : 0;
+  const from12m = anchorDateVal ? anchorDateVal - 11 : 0;
 
   const bySimplified: Record<string, SalesAggregationRecord> = {};
 
@@ -385,13 +477,15 @@ function aggregateSalesCsv(csvText: string): SalesSummaryPayload {
     }
 
     rec.total += r.qty;
-    rec.orders += 1;
+    if (r.qty > 0) {
+      rec.orders += 1;
+    }
 
-    if (r.dateMs !== null) {
-      if (r.dateMs >= cutoff1m) rec.m1 += r.qty;
-      if (r.dateMs >= cutoff3m) rec.m3 += r.qty;
-      if (r.dateMs >= cutoff6m) rec.m6 += r.qty;
-      if (r.dateMs >= cutoff12m) rec.m12 += r.qty;
+    if (r.dateVal !== null && anchorDateVal > 0) {
+      if (r.dateVal === anchorDateVal) rec.m1 += r.qty;
+      if (r.dateVal >= from3m && r.dateVal <= anchorDateVal) rec.m3 += r.qty;
+      if (r.dateVal >= from6m && r.dateVal <= anchorDateVal) rec.m6 += r.qty;
+      if (r.dateVal >= from12m && r.dateVal <= anchorDateVal) rec.m12 += r.qty;
     }
 
     if (r.ym) {
@@ -403,6 +497,7 @@ function aggregateSalesCsv(csvText: string): SalesSummaryPayload {
   const availableMonths = Array.from(monthSet).sort((a, b) => b.localeCompare(a));
 
   return {
+    schemaVersion: SALES_SUMMARY_SCHEMA_VERSION,
     bySimplified,
     totalRows: compactRows.length,
     totalUnits,
@@ -410,6 +505,12 @@ function aggregateSalesCsv(csvText: string): SalesSummaryPayload {
     minDate: new Date(minDateMs).toISOString().slice(0, 10),
     maxDate: new Date(maxDateMs).toISOString().slice(0, 10),
     availableMonths,
+    windowLabels: {
+      m1: formatDateValSpan(from1m, anchorDateVal),
+      m3: formatDateValSpan(from3m, anchorDateVal),
+      m6: formatDateValSpan(from6m, anchorDateVal),
+      m12: formatDateValSpan(from12m, anchorDateVal),
+    },
     syncedAt: new Date().toISOString(),
   };
 }

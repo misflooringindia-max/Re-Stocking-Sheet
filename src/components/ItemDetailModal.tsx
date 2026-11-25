@@ -332,11 +332,11 @@ export const ItemDetailModal: React.FC<ItemDetailModalProps> = ({
               <>
                 <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-[12px]">
                   {[
-                    { key: '1m', label: '1 Month', val: salesRecord.m1 },
-                    { key: '3m', label: '3 Months', val: salesRecord.m3 },
-                    { key: '6m', label: '6 Months', val: salesRecord.m6 },
-                    { key: '12m', label: '12 Months', val: salesRecord.m12 },
-                    { key: 'all', label: 'All Time', val: salesRecord.total },
+                    { key: '1m', label: '1 Month', sub: salesData?.windowLabels?.m1, val: salesRecord.m1 },
+                    { key: '3m', label: '3 Months', sub: salesData?.windowLabels?.m3, val: salesRecord.m3 },
+                    { key: '6m', label: '6 Months', sub: salesData?.windowLabels?.m6, val: salesRecord.m6 },
+                    { key: '12m', label: '12 Months', sub: salesData?.windowLabels?.m12, val: salesRecord.m12 },
+                    { key: 'all', label: 'All Time', sub: undefined, val: salesRecord.total },
                   ].map((box) => {
                     const isSelected = filters.salesPeriod === box.key;
                     return (
@@ -358,6 +358,11 @@ export const ItemDetailModal: React.FC<ItemDetailModalProps> = ({
                         <span className="block mt-0.5 font-mono font-medium text-[14px] text-[var(--text-primary)]">
                           {box.val.toLocaleString()}
                         </span>
+                        {box.sub && (
+                          <span className="block mt-0.5 text-[10px] text-[var(--text-muted)] truncate">
+                            {box.sub}
+                          </span>
+                        )}
                       </div>
                     );
                   })}

@@ -43,6 +43,7 @@ export interface SalesRecord {
 }
 
 export interface SalesSummaryData {
+  schemaVersion?: number;
   bySimplified: Record<string, SalesRecord>;
   totalRows: number;
   totalUnits: number;
@@ -50,6 +51,12 @@ export interface SalesSummaryData {
   minDate: string;
   maxDate: string;
   availableMonths: string[];
+  windowLabels?: {
+    m1: string;
+    m3: string;
+    m6: string;
+    m12: string;
+  };
   syncedAt: string;
 }
 
