@@ -2,6 +2,11 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useInventory } from '../context/InventoryContext';
 import { convertGoogleSheetUrlToCsv } from '../utils/csvHelper';
 import {
+  fetchServerJson,
+  isServerApiUnavailableError,
+  loadSalesDirectOrSnapshot,
+} from '../utils/salesClient';
+import {
   MONTH_NAMES,
   MonthName,
   SalesConsumptionIndex,
@@ -139,40 +144,27 @@ export const ConsumptionCalculatorModal: React.FC<ConsumptionCalculatorModalProp
         forceRefresh ? '&refresh=1' : ''
       }&_t=${Date.now()}`;
 
-      const attempt = async () => {
-        const res = await fetch(url, { cache: 'no-store' });
-        if (!res.ok) {
-          const isJson = (res.headers.get('content-type') || '').includes('application/json');
-          const errJson = isJson ? await res.json().catch(() => null) : null;
-          const err: any = new Error(errJson?.error || `HTTP ${res.status} loading sales sheet.`);
-          err.status = res.status;
-          err.isNonJsonEndpointError = !isJson;
-          throw err;
+      const resolveFallback = async (): Promise<SalesConsumptionIndex> => {
+        if (!forceRefresh && localSalesConsumptionIndex) {
+          return localSalesConsumptionIndex as SalesConsumptionIndex;
         }
-        return (await res.json()) as SalesConsumptionIndex;
+        const loaded = await loadSalesDirectOrSnapshot(rawTarget);
+        return loaded.index as SalesConsumptionIndex;
       };
 
       let data: SalesConsumptionIndex;
       try {
-        data = await attempt();
+        data = await fetchServerJson<SalesConsumptionIndex>(url);
       } catch (firstErr: any) {
-        if (firstErr?.isNonJsonEndpointError || !firstErr?.status || firstErr.status >= 500) {
+        if (isServerApiUnavailableError(firstErr)) {
+          data = await resolveFallback();
+        } else if (!firstErr?.status || firstErr.status >= 500) {
           await new Promise((r) => setTimeout(r, 1200));
           try {
-            data = await attempt();
+            data = await fetchServerJson<SalesConsumptionIndex>(url);
           } catch (retryErr: any) {
-            if (localSalesConsumptionIndex) {
-              data = localSalesConsumptionIndex;
-            } else if (
-              (retryErr?.isNonJsonEndpointError || retryErr?.status === 404) &&
-              (csvUrl.includes('1Xcyd7GOPosV2caGm-fj6ey3KlnvxkhmjcWkywsQVFeg') ||
-                csvUrl.includes('2PACX-1vQDxz7MDyPeEDk6TFYU-vAeBPQT3rrZ6G3wXaL_4BQfKMphIBcdm2sbZS2DMYPD5pRbpENut1mI0ol3'))
-            ) {
-              const snapRes = await fetch('/data/sales-snapshot.json', { cache: 'no-store' });
-              if (!snapRes.ok) throw retryErr;
-              const snap = await snapRes.json();
-              if (!snap?.index) throw retryErr;
-              data = snap.index as SalesConsumptionIndex;
+            if (isServerApiUnavailableError(retryErr) || (retryErr?.status && retryErr.status >= 500)) {
+              data = await resolveFallback();
             } else {
               throw retryErr;
             }

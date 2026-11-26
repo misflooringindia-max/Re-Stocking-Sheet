@@ -103,6 +103,111 @@ export function convertGoogleSheetUrlToCsv(rawUrl: string): string | null {
 }
 
 /**
+ * Returns ordered direct browser CSV fetch candidates for any Google Sheet link.
+ * For standard /spreadsheets/d/{ID} sheets, prefers Google's gviz/tq?tqx=out:csv endpoint
+ * first because it responds 200 OK directly with CORS headers (no cross-origin 307 redirect
+ * to googleusercontent.com), making direct Netlify/static-host fetching reliable.
+ */
+export function getGoogleSheetCsvCandidates(rawUrl: string): string[] {
+  if (!rawUrl || typeof rawUrl !== 'string') return [];
+  const trimmed = rawUrl.trim();
+  if (!trimmed) return [];
+
+  const candidates: string[] = [];
+  const pushUnique = (u: string | null) => {
+    if (u && !candidates.includes(u)) candidates.push(u);
+  };
+
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.hostname === 'docs.google.com' && parsed.pathname.includes('/spreadsheets/')) {
+      if (parsed.pathname.includes('/spreadsheets/d/e/')) {
+        pushUnique(convertGoogleSheetUrlToCsv(trimmed));
+      } else {
+        const idMatch = parsed.pathname.match(/\/spreadsheets(?:\/u\/\d+)?\/d\/([a-zA-Z0-9-_]+)/);
+        if (idMatch && idMatch[1]) {
+          const sheetId = idMatch[1];
+          let gid = parsed.searchParams.get('gid');
+          if (!gid && parsed.hash) {
+            const hashMatch = parsed.hash.match(/gid=([0-9]+)/);
+            if (hashMatch) gid = hashMatch[1];
+          }
+          const gvizUrl = gid
+            ? `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&gid=${gid}`
+            : `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv`;
+          const exportUrl = gid
+            ? `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=${gid}`
+            : `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv`;
+          pushUnique(gvizUrl);
+          pushUnique(exportUrl);
+        }
+      }
+    } else {
+      pushUnique(trimmed);
+    }
+  } catch {
+    if (/^[a-zA-Z0-9-_]{25,}$/.test(trimmed)) {
+      if (trimmed.startsWith('2PACX-')) {
+        pushUnique(`https://docs.google.com/spreadsheets/d/e/${trimmed}/pub?output=csv`);
+      } else {
+        pushUnique(`https://docs.google.com/spreadsheets/d/${trimmed}/gviz/tq?tqx=out:csv`);
+        pushUnique(`https://docs.google.com/spreadsheets/d/${trimmed}/export?format=csv`);
+      }
+    }
+  }
+
+  pushUnique(convertGoogleSheetUrlToCsv(trimmed));
+  return candidates;
+}
+
+/**
+ * Fetches Google Sheet CSV directly from browser across CORS-compatible candidates.
+ */
+export async function fetchGoogleSheetCsvDirect(
+  rawUrl: string,
+  signal?: AbortSignal
+): Promise<string> {
+  const candidates = getGoogleSheetCsvCandidates(rawUrl);
+  if (candidates.length === 0) {
+    throw new Error('Please enter a valid Google Sheet link.');
+  }
+
+  let lastError: Error | null = null;
+  for (const candidateUrl of candidates) {
+    try {
+      const res = await fetch(candidateUrl, { cache: 'no-store', signal });
+      if (!res.ok) {
+        lastError = new Error(
+          res.status === 404
+            ? 'Google Sheet or tab (gid) not found (HTTP 404).'
+            : `Google Sheets returned HTTP ${res.status}`
+        );
+        continue;
+      }
+      const text = await res.text();
+      const head = text.trimStart();
+      if (
+        !head ||
+        head.startsWith('<!DOCTYPE html') ||
+        head.startsWith('<html') ||
+        head.includes('Sign in - Google Accounts')
+      ) {
+        lastError = new Error(
+          'This Google Sheet is private. Please publish to web as CSV or allow "Anyone with the link can view".'
+        );
+        continue;
+      }
+      return text;
+    } catch (err: any) {
+      if (err?.name === 'AbortError') throw err;
+      lastError = err instanceof Error ? err : new Error('Failed to fetch Google Sheet directly.');
+    }
+  }
+
+  throw lastError || new Error('Could not reach Google Sheet directly from browser.');
+}
+
+/**
  * Full RFC 4180 CSV parser supporting quoted commas, escaped quotes, and multiline cells
  */
 function parseCsvRows(csvText: string): string[][] {

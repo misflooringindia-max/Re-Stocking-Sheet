@@ -338,7 +338,7 @@ export const SyncModal: React.FC<SyncModalProps> = ({ isOpen, onClose }) => {
                   <TrendingUp className="w-4 h-4 text-[var(--text-muted)]" />
                   <span>Sales Google Sheet link (per Simplified)</span>
                   <span className="text-[11px] bg-[var(--accent-soft)] text-[var(--accent)] border border-[var(--accent)] px-2 py-0.5 rounded-full font-medium">
-                    {salesData ? 'Synced' : 'Connecting'}
+                    {salesData ? 'Synced' : isSyncingSales ? 'Syncing...' : 'Not synced'}
                   </span>
                 </h3>
                 <p className="text-[12px] text-[var(--text-muted)] mt-1">

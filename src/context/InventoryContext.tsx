@@ -14,12 +14,15 @@ import {
   exportToCsv,
   exportToTsv,
   convertGoogleSheetUrlToCsv,
+  fetchGoogleSheetCsvDirect,
 } from '../utils/csvHelper';
 import {
   saveItemsToDb,
   loadItemsFromDb,
   saveSalesSummaryToDb,
   loadSalesSummaryFromDb,
+  saveSalesExtrasToDb,
+  loadSalesExtrasFromDb,
 } from '../utils/db';
 import {
   aggregateSalesCsv,
@@ -28,6 +31,14 @@ import {
   DailySalesBucket,
   SalesConsumptionIndexPayload,
 } from '../utils/salesAggregation';
+import {
+  LEGACY_SALES_SHEET_ID,
+  fetchServerJson,
+  isServerApiKnownUnavailable,
+  isServerApiUnavailableError,
+  loadSalesDirectOrSnapshot,
+  markServerApiUnavailable,
+} from '../utils/salesClient';
 import initialCsvRaw from '../data/initialData.csv?raw';
 
 interface SyncOptions {
@@ -111,9 +122,6 @@ interface InventoryContextType {
 
 const DEFAULT_THRESHOLD = 15;
 const SALES_SUMMARY_SCHEMA_VERSION = 3;
-const LEGACY_SALES_SHEET_ID =
-  '2PACX-1vQDxz7MDyPeEDk6TFYU-vAeBPQT3rrZ6G3wXaL_4BQfKMphIBcdm2sbZS2DMYPD5pRbpENut1mI0ol3';
-const DEFAULT_SALES_SHEET_ID = '1Xcyd7GOPosV2caGm-fj6ey3KlnvxkhmjcWkywsQVFeg';
 const SHEET_URL_STORAGE_KEY = 'stocksync_published_sheet_url';
 const SALES_URL_STORAGE_KEY = 'stocksync_sales_sheet_url';
 const AUTO_SYNC_STORAGE_KEY = 'stocksync_auto_sync_enabled';
@@ -143,34 +151,34 @@ async function fetchSheetCsvText(rawSheetUrl: string): Promise<string> {
   }
 
   let lastError: Error | null = null;
-  try {
-    const proxyEndpoint = `/api/sheet-csv?url=${encodeURIComponent(csvUrl)}&_t=${Date.now()}`;
-    const res = await fetch(proxyEndpoint, { cache: 'no-store' });
-    if (res.ok) {
-      const text = await res.text();
-      if (text && !text.trimStart().startsWith('<!DOCTYPE html') && !text.trimStart().startsWith('<html')) {
-        return text;
+  if (!isServerApiKnownUnavailable()) {
+    try {
+      const proxyEndpoint = `/api/sheet-csv?url=${encodeURIComponent(csvUrl)}&_t=${Date.now()}`;
+      const res = await fetch(proxyEndpoint, { cache: 'no-store' });
+      if (res.ok) {
+        const text = await res.text();
+        const head = text.trimStart();
+        if (head && !head.startsWith('<!DOCTYPE html') && !head.startsWith('<html')) {
+          return text;
+        }
+        // Static SPA host returned index.html for /api/*
+        markServerApiUnavailable();
+      } else {
+        if (res.status === 404) {
+          markServerApiUnavailable();
+        }
+        const errJson = await res.json().catch(() => null);
+        if (errJson?.error) {
+          lastError = new Error(errJson.error);
+        }
       }
-    } else {
-      const errJson = await res.json().catch(() => null);
-      if (errJson?.error) {
-        lastError = new Error(errJson.error);
-      }
+    } catch (err: any) {
+      lastError = err;
     }
-  } catch (err: any) {
-    lastError = err;
   }
 
   try {
-    const res = await fetch(csvUrl, { cache: 'no-store' });
-    if (!res.ok) {
-      throw new Error(`HTTP ${res.status}`);
-    }
-    const text = await res.text();
-    if (text.trimStart().startsWith('<!DOCTYPE html') || text.trimStart().startsWith('<html')) {
-      throw new Error('Google Sheet is private. Please publish to web as CSV or allow Anyone with the link to view.');
-    }
-    return text;
+    return await fetchGoogleSheetCsvDirect(rawSheetUrl);
   } catch (directErr: any) {
     throw lastError || directErr || new Error('Could not reach Google Sheet. Check your internet connection and link.');
   }
@@ -448,6 +456,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         setSalesSyncError(null);
         setRangeSalesData(null);
         saveSalesSummaryToDb(payloadWithSource).catch(() => {});
+        saveSalesExtrasToDb({ sourceUrl: sourceLabel, dailyBuckets, index }).catch(() => {});
         return {
           success: true,
           rows: summary.totalRows,
@@ -462,7 +471,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     []
   );
 
-  // Sync Sales Summary from server-side aggregator (with retry + static/fallback handling)
+  // Sync Sales Summary from server-side aggregator (with seamless direct browser + snapshot fallback for Netlify)
   const syncSalesSheet = useCallback(
     async (salesUrl?: string, options?: SalesSyncOptions): Promise<SalesSyncResult> => {
       const rawUrl = (salesUrl ?? connectedSalesUrl).trim();
@@ -473,7 +482,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       const csvUrl = convertGoogleSheetUrlToCsv(rawUrl) || rawUrl;
       const forceRefresh = options?.forceRefresh ?? false;
 
-      const attemptFetch = async (): Promise<{
+      const attemptServerFetch = async (): Promise<{
         summary: SalesSummaryData;
         dailyBuckets?: DailySalesBucket[];
         index?: SalesConsumptionIndexPayload;
@@ -481,66 +490,8 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         const endpoint = `/api/sales-summary?url=${encodeURIComponent(csvUrl)}${
           forceRefresh ? '&refresh=1' : ''
         }&_t=${Date.now()}`;
-        const res = await fetch(endpoint, { cache: 'no-store' });
-
-        if (!res.ok) {
-          const contentType = res.headers.get('content-type') || '';
-          const isJson = contentType.includes('application/json');
-          const errJson = isJson ? await res.json().catch(() => null) : null;
-          const err: any = new Error(errJson?.error || `HTTP ${res.status} while syncing sales sheet.`);
-          err.status = res.status;
-          err.isNonJsonEndpointError = !isJson;
-          throw err;
-        }
-        const json = await res.json();
-        return { summary: json };
-      };
-
-      const attemptDirectClientFallback = async (): Promise<{
-        summary: SalesSummaryData;
-        dailyBuckets: DailySalesBucket[];
-        index: SalesConsumptionIndexPayload;
-      }> => {
-        try {
-          const res = await fetch(csvUrl, { cache: 'no-store' });
-          if (!res.ok) {
-            throw new Error(`HTTP ${res.status}`);
-          }
-          const text = await res.text();
-          if (
-            !text.trim() ||
-            text.trimStart().startsWith('<!DOCTYPE html') ||
-            text.trimStart().startsWith('<html')
-          ) {
-            throw new Error('Google Sheet returned HTML instead of CSV.');
-          }
-          const { summary, dailyBuckets } = aggregateSalesCsv(text);
-          const index = buildSalesConsumptionIndex(text);
-          return { summary, dailyBuckets, index };
-        } catch (directErr) {
-          // If direct CORS fetch fails on a static host and URL matches the known default sheet,
-          // load the bundled static sales snapshot so all metrics, filters, and date ranges still work
-          const isKnownDefaultSheet =
-            csvUrl.includes(DEFAULT_SALES_SHEET_ID) ||
-            rawUrl.includes(DEFAULT_SALES_SHEET_ID) ||
-            csvUrl.includes(LEGACY_SALES_SHEET_ID) ||
-            rawUrl.includes(LEGACY_SALES_SHEET_ID);
-
-          if (isKnownDefaultSheet) {
-            const snapRes = await fetch('/data/sales-snapshot.json', { cache: 'no-store' });
-            if (snapRes.ok) {
-              const snap = await snapRes.json();
-              if (snap?.summary?.bySimplified) {
-                return {
-                  summary: snap.summary,
-                  dailyBuckets: snap.dailyBuckets || [],
-                  index: snap.index,
-                };
-              }
-            }
-          }
-          throw directErr;
-        }
+        const summary = await fetchServerJson<SalesSummaryData>(endpoint);
+        return { summary };
       };
 
       try {
@@ -554,35 +505,29 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         };
 
         try {
-          result = await attemptFetch();
+          result = await attemptServerFetch();
         } catch (firstErr: any) {
-          // Do not retry deterministic JSON 4xx errors (e.g. 400 invalid URL, 403 private sheet)
-          if (
+          if (isServerApiUnavailableError(firstErr)) {
+            result = await loadSalesDirectOrSnapshot(rawUrl);
+          } else if (
             firstErr?.status &&
             firstErr.status >= 400 &&
             firstErr.status < 500 &&
-            !firstErr.isNonJsonEndpointError &&
             firstErr.status !== 429
           ) {
+            // Deterministic 4xx JSON error from backend (invalid URL, private sheet, etc.)
             throw firstErr;
-          }
-
-          // Retry once after 1.5s (covers transient 5xx or non-JSON 404 during server restart)
-          await new Promise((r) => setTimeout(r, 1500));
-          try {
-            result = await attemptFetch();
-          } catch (retryErr: any) {
-            // If backend endpoint is still unreachable / non-JSON 404 (e.g. static host), try direct client fetch
-            if (retryErr?.isNonJsonEndpointError || retryErr?.status === 404) {
-              try {
-                result = await attemptDirectClientFallback();
-              } catch {
-                throw new Error(
-                  'Sales sync server endpoint (/api/sales-summary) returned HTTP 404. Please refresh in a few seconds, or use Upload Sales CSV below.'
-                );
+          } else {
+            // Transient server 5xx / network hiccup — retry backend once, else fallback to direct browser fetch
+            await new Promise((r) => setTimeout(r, 1200));
+            try {
+              result = await attemptServerFetch();
+            } catch (retryErr: any) {
+              if (isServerApiUnavailableError(retryErr) || (retryErr?.status && retryErr.status >= 500)) {
+                result = await loadSalesDirectOrSnapshot(rawUrl);
+              } else {
+                throw retryErr;
               }
-            } else {
-              throw retryErr;
             }
           }
         }
@@ -597,6 +542,13 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           setLocalSalesConsumptionIndex(result.index);
         }
         saveSalesSummaryToDb(payloadWithSource).catch(() => {});
+        if (result.dailyBuckets && result.index) {
+          saveSalesExtrasToDb({
+            sourceUrl: csvUrl,
+            dailyBuckets: result.dailyBuckets,
+            index: result.index,
+          }).catch(() => {});
+        }
 
         if (salesUrl && salesUrl.trim() !== connectedSalesUrl) {
           setConnectedSalesUrl(salesUrl.trim());
@@ -713,9 +665,10 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       try {
         setIsLoading(true);
         setLoadingMessage('Restoring inventory records from offline storage...');
-        const [stored, cachedSales] = await Promise.all([
+        const [stored, cachedSales, cachedExtras] = await Promise.all([
           loadItemsFromDb(),
           loadSalesSummaryFromDb(),
+          loadSalesExtrasFromDb(),
         ]);
 
         const hasFreshSchema = cachedSales?.schemaVersion === SALES_SUMMARY_SCHEMA_VERSION;
@@ -723,6 +676,14 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         if (isMounted && cachedSales && cachedSales.bySimplified && hasFreshSchema && matchesSource) {
           setSalesData(cachedSales);
           hasCachedSales = true;
+          if (cachedExtras && cachedExtras.sourceUrl === normalizedSalesCsvUrl) {
+            if (Array.isArray(cachedExtras.dailyBuckets)) {
+              setLocalDailyBuckets(cachedExtras.dailyBuckets);
+            }
+            if (cachedExtras.index) {
+              setLocalSalesConsumptionIndex(cachedExtras.index);
+            }
+          }
         }
 
         if (isMounted && stored && stored.length > 0) {
@@ -826,46 +787,46 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     setRangeSalesError(null);
 
     const requestRange = async () => {
-      const res = await fetch(
-        `/api/sales-range?url=${encodeURIComponent(csvUrl)}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&_t=${Date.now()}`,
-        { cache: 'no-store', signal: controller.signal }
+      const endpoint = `/api/sales-range?url=${encodeURIComponent(csvUrl)}&from=${encodeURIComponent(
+        from
+      )}&to=${encodeURIComponent(to)}&_t=${Date.now()}`;
+      return fetchServerJson<{ bySimplified: Record<string, number>; activeDays: number }>(
+        endpoint,
+        controller.signal
       );
-      if (!res.ok) {
-        const isJson = (res.headers.get('content-type') || '').includes('application/json');
-        const errJson = isJson ? await res.json().catch(() => null) : null;
-        const err: any = new Error(errJson?.error || `HTTP ${res.status} loading date range sales.`);
-        err.status = res.status;
-        err.isNonJsonEndpointError = !isJson;
-        throw err;
+    };
+
+    const resolveDirectRange = async () => {
+      const loaded = await loadSalesDirectOrSnapshot(connectedSalesUrl, controller.signal);
+      if (controller.signal.aborted) throw new DOMException('Aborted', 'AbortError');
+      setLocalDailyBuckets(loaded.dailyBuckets);
+      setLocalSalesConsumptionIndex(loaded.index);
+      if (!salesData) {
+        setSalesData(loaded.summary);
+        saveSalesSummaryToDb(loaded.summary).catch(() => {});
       }
-      return res.json();
+      saveSalesExtrasToDb({
+        sourceUrl: csvUrl,
+        dailyBuckets: loaded.dailyBuckets,
+        index: loaded.index,
+      }).catch(() => {});
+      return computeRangeSalesFromBuckets(loaded.dailyBuckets, from, to);
     };
 
     requestRange()
       .catch(async (firstErr: any) => {
         if (controller.signal.aborted || firstErr?.name === 'AbortError') throw firstErr;
-        if (firstErr?.isNonJsonEndpointError || !firstErr?.status || firstErr.status >= 500) {
+        if (isServerApiUnavailableError(firstErr)) {
+          return resolveDirectRange();
+        }
+        if (!firstErr?.status || firstErr.status >= 500) {
           await new Promise((r) => setTimeout(r, 1200));
           if (controller.signal.aborted) throw firstErr;
           try {
             return await requestRange();
           } catch (retryErr: any) {
-            if (
-              (retryErr?.isNonJsonEndpointError || retryErr?.status === 404) &&
-              (csvUrl.includes(DEFAULT_SALES_SHEET_ID) || csvUrl.includes(LEGACY_SALES_SHEET_ID))
-            ) {
-              const snapRes = await fetch('/data/sales-snapshot.json', {
-                cache: 'no-store',
-                signal: controller.signal,
-              });
-              if (snapRes.ok) {
-                const snap = await snapRes.json();
-                if (Array.isArray(snap?.dailyBuckets)) {
-                  setLocalDailyBuckets(snap.dailyBuckets);
-                  if (snap.index) setLocalSalesConsumptionIndex(snap.index);
-                  return computeRangeSalesFromBuckets(snap.dailyBuckets, from, to);
-                }
-              }
+            if (isServerApiUnavailableError(retryErr) || (retryErr?.status && retryErr.status >= 500)) {
+              return resolveDirectRange();
             }
             throw retryErr;
           }

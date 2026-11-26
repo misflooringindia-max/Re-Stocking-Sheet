@@ -3,6 +3,7 @@
  * Overcomes localStorage's 5MB quota limit.
  */
 import { InventoryItem, SalesSummaryData } from '../types/inventory';
+import { DailySalesBucket, SalesConsumptionIndexPayload } from './salesAggregation';
 
 const DB_NAME = 'StockSyncDB';
 const DB_VERSION = 1;
@@ -122,6 +123,48 @@ export async function loadSalesSummaryFromDb(): Promise<SalesSummaryData | null>
     });
   } catch (err) {
     console.warn('Failed to load sales summary from IndexedDB', err);
+    return null;
+  }
+}
+
+export interface CachedSalesExtras {
+  sourceUrl: string;
+  dailyBuckets: DailySalesBucket[];
+  index: SalesConsumptionIndexPayload;
+}
+
+export async function saveSalesExtrasToDb(extras: CachedSalesExtras): Promise<void> {
+  try {
+    const db = await openDatabase();
+    const tx = db.transaction(META_STORE, 'readwrite');
+    const meta = tx.objectStore(META_STORE);
+    meta.put({ key: 'sales_extras', value: extras });
+
+    return new Promise((resolve, reject) => {
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch (err) {
+    console.warn('Failed to save sales extras to IndexedDB', err);
+  }
+}
+
+export async function loadSalesExtrasFromDb(): Promise<CachedSalesExtras | null> {
+  try {
+    const db = await openDatabase();
+    const tx = db.transaction(META_STORE, 'readonly');
+    const meta = tx.objectStore(META_STORE);
+    const request = meta.get('sales_extras');
+
+    return new Promise((resolve, reject) => {
+      request.onsuccess = () => {
+        const row = request.result;
+        resolve(row?.value ?? null);
+      };
+      request.onerror = () => reject(request.error);
+    });
+  } catch (err) {
+    console.warn('Failed to load sales extras from IndexedDB', err);
     return null;
   }
 }
