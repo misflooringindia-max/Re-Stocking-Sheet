@@ -82,7 +82,7 @@ export const ItemCard: React.FC<ItemCardProps> = ({
   return (
     <div
       className={`group relative rounded-xl bg-[var(--card-bg)] border transition-colors duration-150 flex flex-col justify-between overflow-hidden ${
-        justSaved ? 'border-[var(--accent)] ring-1 ring-[var(--accent)]' : 'border-[var(--border)] hover:border-[#BFC4CC]'
+        justSaved ? 'border-[var(--accent)] ring-1 ring-[var(--accent)]' : 'border-[var(--border)] hover:border-[var(--border-hover)]'
       }`}
     >
       {/* Top Product Section */}
@@ -130,7 +130,7 @@ export const ItemCard: React.FC<ItemCardProps> = ({
               />
               <button
                 onClick={handleNameSave}
-                className="p-1.5 rounded-lg bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white transition-colors duration-150"
+                className="p-1.5 rounded-lg bg-[var(--accent-btn)] hover:bg-[var(--accent-btn-hover)] text-white transition-colors duration-150"
               >
                 <Check className="w-3.5 h-3.5" />
               </button>
@@ -218,7 +218,7 @@ export const ItemCard: React.FC<ItemCardProps> = ({
                 />
                 <button
                   onClick={handleStockSave}
-                  className="p-1.5 rounded-lg bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white transition-colors duration-150"
+                  className="p-1.5 rounded-lg bg-[var(--accent-btn)] hover:bg-[var(--accent-btn-hover)] text-white transition-colors duration-150"
                 >
                   <Check className="w-3.5 h-3.5" />
                 </button>

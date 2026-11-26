@@ -13,11 +13,15 @@ import {
   X,
   FileSpreadsheet,
   Calculator,
+  Sun,
+  Moon,
 } from 'lucide-react';
 
 interface NavbarProps {
   viewMode: 'grid' | 'table';
   setViewMode: (mode: 'grid' | 'table') => void;
+  theme: 'light' | 'dark';
+  onToggleTheme: () => void;
   onOpenSync: () => void;
   onOpenReorder: () => void;
   onOpenAudit: () => void;
@@ -28,6 +32,8 @@ interface NavbarProps {
 export const Navbar: React.FC<NavbarProps> = ({
   viewMode,
   setViewMode,
+  theme,
+  onToggleTheme,
   onOpenSync,
   onOpenReorder,
   onOpenAudit,
@@ -52,7 +58,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   };
 
   return (
-    <header className="sticky top-0 z-30 bg-[var(--header-bg)] text-[var(--header-text)] border-b border-black/15">
+    <header className="sticky top-0 z-30 bg-[var(--header-bg)] text-[var(--header-text)] border-b border-[var(--header-border)]">
       <div className="w-full mx-auto px-4 sm:px-6 py-2.5">
         <div className="flex items-center justify-between gap-3">
           {/* Brand Logo & Live Sync Status */}
@@ -215,10 +221,28 @@ export const Navbar: React.FC<NavbarProps> = ({
               )}
             </button>
 
+            {/* Dark / Light Theme Toggle */}
+            <button
+              type="button"
+              onClick={onToggleTheme}
+              className="px-2.5 py-1.5 rounded-lg bg-[var(--card-bg)] border border-[var(--border)] hover:bg-[var(--table-hover)] text-[var(--text-primary)] text-[12px] font-medium flex items-center gap-1.5 transition-colors duration-150 whitespace-nowrap"
+              title={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+              aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+            >
+              {theme === 'dark' ? (
+                <Sun className="w-4 h-4 text-[var(--accent)]" />
+              ) : (
+                <Moon className="w-4 h-4 text-[var(--text-muted)]" />
+              )}
+              <span className="hidden 2xl:inline">
+                {theme === 'dark' ? 'Light' : 'Dark'}
+              </span>
+            </button>
+
             {/* Primary Action: Re-Order Button (ONLY primary amber button) */}
             <button
               onClick={onOpenReorder}
-              className="px-3 py-1.5 rounded-lg bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white text-[12px] font-medium flex items-center gap-1.5 transition-colors duration-150 whitespace-nowrap"
+              className="px-3 py-1.5 rounded-lg bg-[var(--accent-btn)] hover:bg-[var(--accent-btn-hover)] text-white text-[12px] font-medium flex items-center gap-1.5 transition-colors duration-150 whitespace-nowrap"
               title="Re-order management"
             >
               <ShoppingCart className="w-4 h-4 text-white" />

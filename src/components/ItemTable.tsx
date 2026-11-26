@@ -204,7 +204,7 @@ export const ItemTable: React.FC<ItemTableProps> = ({
                         />
                         <button
                           onClick={() => saveEdit(item)}
-                          className="p-1.5 rounded-lg bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white transition-colors duration-150"
+                          className="p-1.5 rounded-lg bg-[var(--accent-btn)] hover:bg-[var(--accent-btn-hover)] text-white transition-colors duration-150"
                         >
                           <Check className="w-3.5 h-3.5" />
                         </button>
@@ -260,7 +260,7 @@ export const ItemTable: React.FC<ItemTableProps> = ({
                           />
                           <button
                             onClick={() => saveEdit(item)}
-                            className="p-1.5 rounded-lg bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white transition-colors duration-150"
+                            className="p-1.5 rounded-lg bg-[var(--accent-btn)] hover:bg-[var(--accent-btn-hover)] text-white transition-colors duration-150"
                           >
                             <Check className="w-3 h-3" />
                           </button>

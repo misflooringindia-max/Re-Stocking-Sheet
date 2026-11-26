@@ -179,7 +179,7 @@ export const AuditModeModal: React.FC<AuditModeModalProps> = ({ isOpen, onClose 
                 <div className="pt-1">
                   <button
                     onClick={handleApplyCount}
-                    className="w-full py-2.5 rounded-lg bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white text-[13px] font-medium flex items-center justify-center gap-2 transition-colors duration-150"
+                    className="w-full py-2.5 rounded-lg bg-[var(--accent-btn)] hover:bg-[var(--accent-btn-hover)] text-white text-[13px] font-medium flex items-center justify-center gap-2 transition-colors duration-150"
                   >
                     <PackageCheck className="w-4 h-4" />
                     <span>Save physical count</span>

@@ -25,6 +25,7 @@ import {
 } from 'lucide-react';
 
 const SIDEBAR_OPEN_STORAGE_KEY = 'stocksync_desktop_sidebar_open_v1';
+const THEME_STORAGE_KEY = 'stocksync_theme_v1';
 
 const STATUS_CHIP_LABELS: Record<string, string> = {
   out_of_stock: 'Out of Stock',
@@ -81,6 +82,33 @@ function DashboardContent() {
     return true;
   });
   const [isMobileDrawerOpen, setIsMobileDrawerOpen] = useState<boolean>(false);
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
+    try {
+      const saved = localStorage.getItem(THEME_STORAGE_KEY);
+      if (saved === 'dark' || saved === 'light') return saved;
+    } catch {
+      // ignore storage errors
+    }
+    return document.documentElement.classList.contains('dark') ? 'dark' : 'light';
+  });
+
+  useEffect(() => {
+    const isDark = theme === 'dark';
+    document.documentElement.classList.toggle('dark', isDark);
+    try {
+      localStorage.setItem(THEME_STORAGE_KEY, theme);
+    } catch {
+      // ignore storage errors
+    }
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) {
+      meta.setAttribute('content', isDark ? '#0D0F12' : '#2B2F36');
+    }
+  }, [theme]);
+
+  const handleToggleTheme = () => {
+    setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
+  };
 
   useEffect(() => {
     try {
@@ -254,6 +282,8 @@ function DashboardContent() {
       <Navbar
         viewMode={viewMode}
         setViewMode={setViewMode}
+        theme={theme}
+        onToggleTheme={handleToggleTheme}
         onOpenSync={() => setIsSyncOpen(true)}
         onOpenReorder={() => setIsReorderOpen(true)}
         onOpenAudit={() => setIsAuditOpen(true)}
@@ -287,7 +317,7 @@ function DashboardContent() {
                 {isDesktopSidebarOpen ? 'Hide filters to expand grid' : 'Show filters'}
               </span>
               {!isDesktopSidebarOpen && activeChips.length > 0 && (
-                <span className="px-1.5 py-0.5 rounded-full bg-[var(--accent)] text-white text-[11px] font-medium leading-none">
+                <span className="px-1.5 py-0.5 rounded-full bg-[var(--accent-btn)] text-white text-[11px] font-medium leading-none">
                   {activeChips.length}
                 </span>
               )}
@@ -302,7 +332,7 @@ function DashboardContent() {
               <Menu className="w-4 h-4 text-[var(--text-muted)]" />
               <span>Filters</span>
               {activeChips.length > 0 && (
-                <span className="px-1.5 py-0.5 rounded-full bg-[var(--accent)] text-white text-[11px] font-medium leading-none">
+                <span className="px-1.5 py-0.5 rounded-full bg-[var(--accent-btn)] text-white text-[11px] font-medium leading-none">
                   {activeChips.length}
                 </span>
               )}
@@ -383,7 +413,7 @@ function DashboardContent() {
                       key={chip.key}
                       type="button"
                       onClick={chip.onRemove}
-                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[var(--accent-soft)] text-[var(--accent)] border border-[var(--accent)] hover:bg-[#FBE4C8] text-[12px] font-medium transition-colors duration-150"
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[var(--accent-soft)] text-[var(--accent)] border border-[var(--accent)] hover:bg-[var(--accent-soft-hover)] text-[12px] font-medium transition-colors duration-150"
                       title={`Remove ${chip.label} filter`}
                     >
                       <span>{chip.label}</span>
@@ -472,11 +502,11 @@ function DashboardContent() {
         {stats.reorderCount > 0 && (
           <button
             onClick={() => setIsReorderOpen(true)}
-            className="p-3 rounded-lg bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white relative transition-colors duration-150"
+            className="p-3 rounded-lg bg-[var(--accent-btn)] hover:bg-[var(--accent-btn-hover)] text-white relative transition-colors duration-150"
             title="Re-order alerts"
           >
             <ShoppingCart className="w-5 h-5" />
-            <span className="absolute -top-1.5 -right-1.5 min-w-[20px] h-5 px-1 bg-[var(--header-bg)] text-white text-[11px] font-medium rounded-full flex items-center justify-center border border-white">
+            <span className="absolute -top-1.5 -right-1.5 min-w-[20px] h-5 px-1 bg-[var(--header-bg)] text-white text-[11px] font-medium rounded-full flex items-center justify-center border border-[var(--card-bg)]">
               {stats.reorderCount}
             </span>
           </button>

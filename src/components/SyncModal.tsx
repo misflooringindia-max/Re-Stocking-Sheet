@@ -264,7 +264,7 @@ export const SyncModal: React.FC<SyncModalProps> = ({ isOpen, onClose }) => {
                 <button
                   type="submit"
                   disabled={isSyncing || isLoading || !isOnline}
-                  className="px-4 py-2 rounded-lg bg-[var(--accent)] hover:bg-[var(--accent-hover)] disabled:opacity-40 text-white text-[13px] font-medium flex items-center justify-center gap-2 transition-colors duration-150"
+                  className="px-4 py-2 rounded-lg bg-[var(--accent-btn)] hover:bg-[var(--accent-btn-hover)] disabled:opacity-40 text-white text-[13px] font-medium flex items-center justify-center gap-2 transition-colors duration-150"
                 >
                   <RefreshCw className={`w-3.5 h-3.5 text-white ${isSyncing ? 'animate-spin' : ''}`} />
                   <span>{isSyncing ? 'Syncing...' : 'Sync now (keep local edits)'}</span>

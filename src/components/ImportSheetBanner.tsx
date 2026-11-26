@@ -169,7 +169,7 @@ export const ImportSheetBanner: React.FC<ImportSheetBannerProps> = ({ onOpenSync
           <button
             onClick={handleDirectSync}
             disabled={isSyncing || !isOnline}
-            className="px-3.5 py-2 rounded-lg bg-[var(--accent)] hover:bg-[var(--accent-hover)] disabled:opacity-40 text-white text-[13px] font-medium flex items-center justify-center gap-2 transition-colors duration-150"
+            className="px-3.5 py-2 rounded-lg bg-[var(--accent-btn)] hover:bg-[var(--accent-btn-hover)] disabled:opacity-40 text-white text-[13px] font-medium flex items-center justify-center gap-2 transition-colors duration-150"
           >
             <RefreshCw className={`w-4 h-4 text-white ${isSyncing ? 'animate-spin' : ''}`} />
             <span>{isSyncing ? 'Syncing sheet...' : 'Sync live sheet'}</span>

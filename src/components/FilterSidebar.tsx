@@ -340,10 +340,10 @@ const SidebarScrollArea: React.FC<SidebarScrollAreaProps> = ({ children }) => {
             ref={thumbRef}
             className={`absolute top-0 w-[8px] rounded-full transition-colors duration-150 ${
               !scrollBounds.canScroll
-                ? 'bg-[#D0D4DC]'
+                ? 'bg-[var(--slider-thumb-disabled)]'
                 : isDragging
                 ? 'bg-[var(--accent)]'
-                : 'bg-[#9AA1AD] hover:bg-[var(--accent)]'
+                : 'bg-[var(--slider-thumb-idle)] hover:bg-[var(--accent)]'
             }`}
           />
         </div>
@@ -974,7 +974,7 @@ export const FilterSidebar: React.FC<FilterSidebarProps> = ({
           <button
             type="button"
             onClick={onCloseMobile}
-            className="flex-1 px-3 py-2 rounded-lg bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white text-[13px] font-medium transition-colors duration-150"
+            className="flex-1 px-3 py-2 rounded-lg bg-[var(--accent-btn)] hover:bg-[var(--accent-btn-hover)] text-white text-[13px] font-medium transition-colors duration-150"
           >
             Apply
           </button>

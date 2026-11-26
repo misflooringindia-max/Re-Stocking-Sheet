@@ -32,7 +32,7 @@ export const StatsCards: React.FC<StatsCardsProps> = ({ onOpenReorder }) => {
         className={`text-left bg-[var(--card-bg)] border rounded-xl p-4 flex flex-col justify-between transition-colors duration-150 ${
           filters.status === 'all'
             ? 'border-[var(--accent)] ring-1 ring-[var(--accent)]'
-            : 'border-[var(--border)] hover:border-[#BFC4CC]'
+            : 'border-[var(--border)] hover:border-[var(--border-hover)]'
         }`}
       >
         <div className="flex items-center justify-between w-full">
@@ -57,7 +57,7 @@ export const StatsCards: React.FC<StatsCardsProps> = ({ onOpenReorder }) => {
         className={`text-left bg-[var(--card-bg)] border rounded-xl p-4 flex flex-col justify-between transition-colors duration-150 ${
           filters.status === 'out_of_stock'
             ? 'border-[var(--accent)] ring-1 ring-[var(--accent)]'
-            : 'border-[var(--border)] hover:border-[#BFC4CC]'
+            : 'border-[var(--border)] hover:border-[var(--border-hover)]'
         }`}
       >
         <div className="flex items-center justify-between w-full">
@@ -85,7 +85,7 @@ export const StatsCards: React.FC<StatsCardsProps> = ({ onOpenReorder }) => {
         className={`text-left bg-[var(--card-bg)] border rounded-xl p-4 flex flex-col justify-between transition-colors duration-150 ${
           filters.status === 'low_stock'
             ? 'border-[var(--accent)] ring-1 ring-[var(--accent)]'
-            : 'border-[var(--border)] hover:border-[#BFC4CC]'
+            : 'border-[var(--border)] hover:border-[var(--border-hover)]'
         }`}
       >
         <div className="flex items-center justify-between w-full">
@@ -110,7 +110,7 @@ export const StatsCards: React.FC<StatsCardsProps> = ({ onOpenReorder }) => {
         className={`text-left bg-[var(--card-bg)] border rounded-xl p-4 flex flex-col justify-between transition-colors duration-150 ${
           filters.status === 'in_stock'
             ? 'border-[var(--accent)] ring-1 ring-[var(--accent)]'
-            : 'border-[var(--border)] hover:border-[#BFC4CC]'
+            : 'border-[var(--border)] hover:border-[var(--border-hover)]'
         }`}
       >
         <div className="flex items-center justify-between w-full">

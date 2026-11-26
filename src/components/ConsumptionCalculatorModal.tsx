@@ -1089,7 +1089,7 @@ export const ConsumptionCalculatorModal: React.FC<ConsumptionCalculatorModalProp
               type="button"
               disabled={calculatedRows.length === 0}
               onClick={handleDownloadCsv}
-              className="px-4 py-2 rounded-lg bg-[var(--accent)] hover:bg-[var(--accent-hover)] disabled:opacity-40 text-white text-[13px] font-medium inline-flex items-center gap-1.5 transition-colors duration-150"
+              className="px-4 py-2 rounded-lg bg-[var(--accent-btn)] hover:bg-[var(--accent-btn-hover)] disabled:opacity-40 text-white text-[13px] font-medium inline-flex items-center gap-1.5 transition-colors duration-150"
             >
               <Download className="w-4 h-4 text-white" />
               <span>Download updated CSV</span>

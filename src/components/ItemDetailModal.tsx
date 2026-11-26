@@ -183,7 +183,7 @@ export const ItemDetailModal: React.FC<ItemDetailModalProps> = ({
                     />
                     <button
                       onClick={handleNameSave}
-                      className="px-3.5 py-1.5 rounded-lg bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white font-medium text-[13px] flex items-center gap-1 transition-colors duration-150"
+                      className="px-3.5 py-1.5 rounded-lg bg-[var(--accent-btn)] hover:bg-[var(--accent-btn-hover)] text-white font-medium text-[13px] flex items-center gap-1 transition-colors duration-150"
                     >
                       <Check className="w-4 h-4" />
                       <span>Save</span>
@@ -292,7 +292,7 @@ export const ItemDetailModal: React.FC<ItemDetailModalProps> = ({
                 />
                 <button
                   onClick={() => handleStockSave()}
-                  className="px-3 py-1 rounded-lg bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-[12px] font-medium text-white transition-colors duration-150"
+                  className="px-3 py-1 rounded-lg bg-[var(--accent-btn)] hover:bg-[var(--accent-btn-hover)] text-[12px] font-medium text-white transition-colors duration-150"
                 >
                   Update
                 </button>
