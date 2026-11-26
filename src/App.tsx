@@ -22,6 +22,7 @@ import {
   Loader2,
   Menu,
   X,
+  Calendar,
 } from 'lucide-react';
 
 const SIDEBAR_OPEN_STORAGE_KEY = 'stocksync_desktop_sidebar_open_v1';
@@ -59,7 +60,17 @@ const SALES_CHIP_LABELS: Record<string, string> = {
 };
 
 function DashboardContent() {
-  const { filteredItems, filters, setFilters, stats, isLoading, loadingMessage } = useInventory();
+  const {
+    filteredItems,
+    filters,
+    setFilters,
+    stats,
+    salesData,
+    isLoadingRangeSales,
+    rangeSalesError,
+    isLoading,
+    loadingMessage,
+  } = useInventory();
 
   const [viewMode, setViewMode] = useState<'grid' | 'table'>('grid');
   const [selectedDetailItem, setSelectedDetailItem] = useState<InventoryItem | null>(null);
@@ -154,6 +165,56 @@ function DashboardContent() {
     setSelectedHistoryItem(null);
     setIsHistoryOpen(true);
   };
+
+  const isCustomRangeActive = filters.salesPeriod.startsWith('range:');
+  const activeRangeParts = isCustomRangeActive ? filters.salesPeriod.slice(6).split('..') : ['', ''];
+  const [barFromDate, setBarFromDate] = useState<string>(activeRangeParts[0] || '');
+  const [barToDate, setBarToDate] = useState<string>(activeRangeParts[1] || '');
+
+  useEffect(() => {
+    if (filters.salesPeriod.startsWith('range:')) {
+      const [f, t] = filters.salesPeriod.slice(6).split('..');
+      setBarFromDate(f || '');
+      setBarToDate(t || '');
+    } else {
+      setBarFromDate('');
+      setBarToDate('');
+    }
+  }, [filters.salesPeriod]);
+
+  const applyBarDateRange = (nextFrom: string, nextTo: string) => {
+    setBarFromDate(nextFrom);
+    setBarToDate(nextTo);
+    if (nextFrom && nextTo && nextFrom <= nextTo) {
+      setFilters((p) => ({
+        ...p,
+        salesPeriod: `range:${nextFrom}..${nextTo}`,
+      }));
+    }
+  };
+
+  const applyBarRelativeMonths = (months: number) => {
+    if (!salesData?.maxDate) return;
+    const endDate = new Date(`${salesData.maxDate}T00:00:00Z`);
+    if (Number.isNaN(endDate.getTime())) return;
+    const startDate = new Date(endDate);
+    startDate.setUTCMonth(startDate.getUTCMonth() - months);
+    startDate.setUTCDate(startDate.getUTCDate() + 1);
+    const minMs = salesData.minDate ? Date.parse(`${salesData.minDate}T00:00:00Z`) : 0;
+    const finalStart =
+      minMs && startDate.getTime() < minMs ? salesData.minDate : startDate.toISOString().slice(0, 10);
+    applyBarDateRange(finalStart, salesData.maxDate);
+  };
+
+  const clearBarDateRange = () => {
+    setBarFromDate('');
+    setBarToDate('');
+    if (filters.salesPeriod.startsWith('range:')) {
+      setFilters((p) => ({ ...p, salesPeriod: '3m' }));
+    }
+  };
+
+  const isInvalidBarRange = Boolean(barFromDate && barToDate && barFromDate > barToDate);
 
   const handleResetAllFilters = () => {
     setFilters((p) => ({
@@ -293,8 +354,8 @@ function DashboardContent() {
 
       {/* Main Workspace Container: Hamburger/Filters Toggle + Left Sidebar + Right Content */}
       <div className="flex-1 w-full mx-auto px-4 sm:px-6 py-4 sm:py-5">
-        {/* Top-Left Sidebar Toggle Bar (Hamburger / Filters button above the sidebar) */}
-        <div className="flex items-center justify-between gap-3 mb-4">
+        {/* Top-Left Sidebar Toggle Bar + Quick Sales Date Range Filter */}
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
           <div className="flex items-center gap-2.5">
             {/* Desktop Toggle Button */}
             <button
@@ -341,6 +402,94 @@ function DashboardContent() {
             <span className="hidden xl:inline text-[11px] text-[var(--text-muted)]">
               Shortcut: Ctrl+B
             </span>
+          </div>
+
+          {/* Always-visible Sales Date Range Filter Bar */}
+          <div className="flex flex-wrap items-center gap-2 bg-[var(--card-bg)] border border-[var(--border)] rounded-lg px-2.5 py-1.5">
+            <div className="flex items-center gap-1.5 text-[12px] font-medium text-[var(--text-primary)]">
+              <Calendar
+                className={`w-3.5 h-3.5 shrink-0 ${
+                  isCustomRangeActive ? 'text-[var(--accent)]' : 'text-[var(--text-muted)]'
+                }`}
+              />
+              <span>Sales Date Range:</span>
+            </div>
+
+            <div className="flex items-center gap-1.5">
+              <input
+                type="date"
+                aria-label="Sales From Date"
+                value={barFromDate}
+                min={salesData?.minDate || undefined}
+                max={barToDate || salesData?.maxDate || undefined}
+                onChange={(e) => applyBarDateRange(e.target.value, barToDate)}
+                className={`rounded-md px-2 py-1 text-[12px] border focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-[var(--accent)] transition-colors duration-150 ${
+                  isCustomRangeActive
+                    ? 'bg-[var(--accent-soft)] border-[var(--accent)] text-[var(--accent)] font-medium'
+                    : 'bg-[var(--surface-subtle)] border-[var(--border)] text-[var(--text-primary)] font-normal'
+                }`}
+              />
+              <span className="text-[12px] text-[var(--text-muted)]">to</span>
+              <input
+                type="date"
+                aria-label="Sales To Date"
+                value={barToDate}
+                min={barFromDate || salesData?.minDate || undefined}
+                max={salesData?.maxDate || undefined}
+                onChange={(e) => applyBarDateRange(barFromDate, e.target.value)}
+                className={`rounded-md px-2 py-1 text-[12px] border focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-[var(--accent)] transition-colors duration-150 ${
+                  isCustomRangeActive
+                    ? 'bg-[var(--accent-soft)] border-[var(--accent)] text-[var(--accent)] font-medium'
+                    : 'bg-[var(--surface-subtle)] border-[var(--border)] text-[var(--text-primary)] font-normal'
+                }`}
+              />
+            </div>
+
+            <div className="flex items-center gap-1">
+              {[
+                { label: '3M', months: 3 },
+                { label: '6M', months: 6 },
+                { label: '12M', months: 12 },
+              ].map((quick) => (
+                <button
+                  key={quick.label}
+                  type="button"
+                  disabled={!salesData?.maxDate}
+                  onClick={() => applyBarRelativeMonths(quick.months)}
+                  className="px-2 py-1 rounded-md text-[11px] border border-[var(--border)] bg-[var(--surface-subtle)] hover:bg-[var(--accent-soft)] hover:text-[var(--accent)] hover:border-[var(--accent)] disabled:opacity-40 text-[var(--text-primary)] font-medium transition-colors duration-150"
+                  title={`Filter last ${quick.months} months by exact date`}
+                >
+                  {quick.label}
+                </button>
+              ))}
+            </div>
+
+            {(barFromDate || barToDate || isCustomRangeActive) && (
+              <button
+                type="button"
+                onClick={clearBarDateRange}
+                className="px-2 py-1 rounded-md text-[11px] font-medium text-[var(--accent)] hover:bg-[var(--accent-soft)] transition-colors duration-150"
+                title="Clear custom date range"
+              >
+                Clear
+              </button>
+            )}
+
+            {isInvalidBarRange && (
+              <span className="text-[11px] font-medium text-[var(--accent)]">
+                From must be ≤ To
+              </span>
+            )}
+
+            {isCustomRangeActive && !isInvalidBarRange && !rangeSalesError && (
+              <span className="text-[11px] font-mono font-medium text-[var(--accent)] pl-1 border-l border-[var(--table-divider)]">
+                {isLoadingRangeSales ? 'Loading...' : `${stats.filteredSalesTotal.toLocaleString()} units`}
+              </span>
+            )}
+
+            {rangeSalesError && (
+              <span className="text-[11px] font-medium text-[var(--accent)]">{rangeSalesError}</span>
+            )}
           </div>
         </div>
 

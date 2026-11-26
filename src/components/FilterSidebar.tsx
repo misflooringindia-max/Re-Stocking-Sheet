@@ -27,7 +27,7 @@ export type FilterSectionKey =
 
 type AccordionState = Record<FilterSectionKey, boolean>;
 
-const ACCORDION_STORAGE_KEY = 'stocksync_sidebar_accordion_v3';
+const ACCORDION_STORAGE_KEY = 'stocksync_sidebar_accordion_v4';
 
 const DEFAULT_ACCORDION_STATE: AccordionState = {
   category: true,
