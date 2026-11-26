@@ -68,7 +68,13 @@ interface SalesSummaryPayload {
   syncedAt: string;
 }
 
+interface DailySalesBucket {
+  dateIso: string;
+  unitsByKey: Record<string, number>;
+}
+
 const salesCache = new Map<string, { timestamp: number; data: SalesSummaryPayload }>();
+const dailySalesCache = new Map<string, { timestamp: number; days: DailySalesBucket[] }>();
 const SALES_CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 const SALES_SUMMARY_SCHEMA_VERSION = 3;
 
@@ -315,7 +321,10 @@ function parseSalesDateMs(rawDate: string, rawMonth: string, rawYear: string): n
   return null;
 }
 
-function aggregateSalesCsv(csvText: string): SalesSummaryPayload {
+function aggregateSalesCsv(csvText: string): {
+  summary: SalesSummaryPayload;
+  dailyBuckets: DailySalesBucket[];
+} {
   const lines = csvText.split(/\r?\n/);
   if (lines.length === 0) {
     throw new Error('Sales CSV is empty.');
@@ -364,6 +373,7 @@ function aggregateSalesCsv(csvText: string): SalesSummaryPayload {
   const monthSet = new Set<string>();
   const dateValUnits: Record<number, number> = Object.create(null);
   const dateValDays: Record<number, Set<string>> = Object.create(null);
+  const dailyMap = new Map<string, Record<string, number>>();
 
   for (let i = headerIdx + 1; i < lines.length; i++) {
     const line = lines[i];
@@ -375,6 +385,7 @@ function aggregateSalesCsv(csvText: string): SalesSummaryPayload {
     const rawSimplified = (cols[effSimplifiedIdx] || '').trim();
     if (!rawSimplified) continue;
 
+    const key = rawSimplified.toLowerCase();
     const qty = Math.max(0, parseNumericQty(cols[effQtyIdx]));
 
     const rawDate = cols[effDateIdx] || '';
@@ -398,6 +409,7 @@ function aggregateSalesCsv(csvText: string): SalesSummaryPayload {
     if (dateMs !== null) {
       if (dateMs < minDateMs) minDateMs = dateMs;
       if (dateMs > maxDateMs) maxDateMs = dateMs;
+      const dateIso = new Date(dateMs).toISOString().slice(0, 10);
       if (dateVal === null) {
         const d = new Date(dateMs);
         const y = d.getUTCFullYear();
@@ -407,7 +419,14 @@ function aggregateSalesCsv(csvText: string): SalesSummaryPayload {
         monthSet.add(ym);
       }
       if (!dateValDays[dateVal]) dateValDays[dateVal] = new Set();
-      dateValDays[dateVal].add(new Date(dateMs).toISOString().slice(0, 10));
+      dateValDays[dateVal].add(dateIso);
+
+      let dayUnits = dailyMap.get(dateIso);
+      if (!dayUnits) {
+        dayUnits = Object.create(null) as Record<string, number>;
+        dailyMap.set(dateIso, dayUnits);
+      }
+      dayUnits[key] = (dayUnits[key] || 0) + qty;
     }
 
     if (dateVal !== null) {
@@ -418,7 +437,7 @@ function aggregateSalesCsv(csvText: string): SalesSummaryPayload {
     totalUnits += qty;
 
     compactRows.push({
-      key: rawSimplified.toLowerCase(),
+      key,
       displayName: rawSimplified,
       qty,
       dateVal,
@@ -495,23 +514,29 @@ function aggregateSalesCsv(csvText: string): SalesSummaryPayload {
   }
 
   const availableMonths = Array.from(monthSet).sort((a, b) => b.localeCompare(a));
+  const dailyBuckets: DailySalesBucket[] = Array.from(dailyMap.entries())
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([dateIso, unitsByKey]) => ({ dateIso, unitsByKey }));
 
   return {
-    schemaVersion: SALES_SUMMARY_SCHEMA_VERSION,
-    bySimplified,
-    totalRows: compactRows.length,
-    totalUnits,
-    uniqueSimplified: Object.keys(bySimplified).length,
-    minDate: new Date(minDateMs).toISOString().slice(0, 10),
-    maxDate: new Date(maxDateMs).toISOString().slice(0, 10),
-    availableMonths,
-    windowLabels: {
-      m1: formatDateValSpan(from1m, anchorDateVal),
-      m3: formatDateValSpan(from3m, anchorDateVal),
-      m6: formatDateValSpan(from6m, anchorDateVal),
-      m12: formatDateValSpan(from12m, anchorDateVal),
+    summary: {
+      schemaVersion: SALES_SUMMARY_SCHEMA_VERSION,
+      bySimplified,
+      totalRows: compactRows.length,
+      totalUnits,
+      uniqueSimplified: Object.keys(bySimplified).length,
+      minDate: new Date(minDateMs).toISOString().slice(0, 10),
+      maxDate: new Date(maxDateMs).toISOString().slice(0, 10),
+      availableMonths,
+      windowLabels: {
+        m1: formatDateValSpan(from1m, anchorDateVal),
+        m3: formatDateValSpan(from3m, anchorDateVal),
+        m6: formatDateValSpan(from6m, anchorDateVal),
+        m12: formatDateValSpan(from12m, anchorDateVal),
+      },
+      syncedAt: new Date().toISOString(),
     },
-    syncedAt: new Date().toISOString(),
+    dailyBuckets,
   };
 }
 
@@ -629,12 +654,18 @@ async function startServer() {
 
   const inFlightSalesLoads = new Map<
     string,
-    Promise<{ summary: SalesSummaryPayload; index: SalesConsumptionIndexPayload }>
+    Promise<{
+      summary: SalesSummaryPayload;
+      index: SalesConsumptionIndexPayload;
+      dailyBuckets: DailySalesBucket[];
+    }>
   >();
 
-  async function fetchAndBuildSales(
-    cacheKey: string
-  ): Promise<{ summary: SalesSummaryPayload; index: SalesConsumptionIndexPayload }> {
+  async function fetchAndBuildSales(cacheKey: string): Promise<{
+    summary: SalesSummaryPayload;
+    index: SalesConsumptionIndexPayload;
+    dailyBuckets: DailySalesBucket[];
+  }> {
     const existing = inFlightSalesLoads.get(cacheKey);
     if (existing) return existing;
 
@@ -667,12 +698,13 @@ async function startServer() {
         throw err;
       }
 
-      const summary = aggregateSalesCsv(text);
+      const { summary, dailyBuckets } = aggregateSalesCsv(text);
       const index = buildSalesConsumptionIndex(text);
       const now = Date.now();
       salesCache.set(cacheKey, { timestamp: now, data: summary });
+      dailySalesCache.set(cacheKey, { timestamp: now, days: dailyBuckets });
       consumptionIndexCache.set(cacheKey, { timestamp: now, data: index });
-      return { summary, index };
+      return { summary, index, dailyBuckets };
     })().finally(() => {
       inFlightSalesLoads.delete(cacheKey);
     });
@@ -756,6 +788,79 @@ async function startServer() {
     } catch (err: any) {
       res.status(err?.statusCode || 502).json({
         error: err?.message || 'Failed to fetch sales CSV for consumption calculation.',
+      });
+    }
+  });
+
+  // Custom From-To Date Range Sales Query API (filters cached daily buckets in milliseconds)
+  app.get('/api/sales-range', async (req: Request, res: Response) => {
+    const rawUrl =
+      typeof req.query.url === 'string' && req.query.url.trim()
+        ? req.query.url.trim()
+        : DEFAULT_SALES_CSV_URL;
+    const from = typeof req.query.from === 'string' ? req.query.from.trim() : '';
+    const to = typeof req.query.to === 'string' ? req.query.to.trim() : '';
+    const isoRe = /^\d{4}-\d{2}-\d{2}$/;
+
+    if (!isoRe.test(from) || !isoRe.test(to)) {
+      res.status(400).json({ error: 'Invalid from/to date format. Use YYYY-MM-DD.' });
+      return;
+    }
+    if (from > to) {
+      res.status(400).json({ error: 'Start date must be on or before end date.' });
+      return;
+    }
+
+    let parsed: URL;
+    try {
+      parsed = normalizeSalesSheetCsvUrl(rawUrl);
+    } catch (err: any) {
+      res.status(err?.statusCode || 400).json({ error: err?.message || 'Invalid sales sheet URL format' });
+      return;
+    }
+
+    const cacheKey = parsed.toString();
+    try {
+      let days = dailySalesCache.get(cacheKey)?.days;
+      if (!days) {
+        const loaded = await fetchAndBuildSales(cacheKey);
+        days = loaded.dailyBuckets;
+      } else {
+        const cachedEntry = dailySalesCache.get(cacheKey);
+        if (cachedEntry && Date.now() - cachedEntry.timestamp >= SALES_CACHE_TTL_MS) {
+          fetchAndBuildSales(cacheKey).catch(() => {});
+        }
+      }
+
+      const bySimplified: Record<string, number> = Object.create(null);
+      let totalUnits = 0;
+      let activeDays = 0;
+
+      for (let i = 0; i < days.length; i++) {
+        const bucket = days[i];
+        if (bucket.dateIso < from) continue;
+        if (bucket.dateIso > to) break;
+        activeDays++;
+        const entries = bucket.unitsByKey;
+        for (const k in entries) {
+          const q = entries[k];
+          bySimplified[k] = (bySimplified[k] || 0) + q;
+          totalUnits += q;
+        }
+      }
+
+      res.setHeader('Cache-Control', 'no-store');
+      res.status(200).json({
+        from,
+        to,
+        totalUnits,
+        activeDays,
+        uniqueSimplified: Object.keys(bySimplified).length,
+        bySimplified,
+      });
+    } catch (err: any) {
+      res.status(err?.statusCode || 502).json({
+        error: err?.message || 'Failed to compute sales for selected date range.',
       });
     }
   });

@@ -65,6 +65,8 @@ interface InventoryContextType {
   setConnectedSalesUrl: (url: string) => void;
   isSyncingSales: boolean;
   salesSyncError: string | null;
+  isLoadingRangeSales: boolean;
+  rangeSalesError: string | null;
   syncSalesSheet: (salesUrl?: string, options?: SalesSyncOptions) => Promise<SalesSyncResult>;
   getItemSales: (simplified: string, period?: SalesPeriod) => number;
   getItemSalesRecord: (simplified: string) => SalesRecord | null;
@@ -348,6 +350,13 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const [salesData, setSalesData] = useState<SalesSummaryData | null>(null);
   const [isSyncingSales, setIsSyncingSales] = useState<boolean>(false);
   const [salesSyncError, setSalesSyncError] = useState<string | null>(null);
+  const [rangeSalesData, setRangeSalesData] = useState<{
+    key: string;
+    bySimplified: Record<string, number>;
+    activeDays: number;
+  } | null>(null);
+  const [isLoadingRangeSales, setIsLoadingRangeSales] = useState<boolean>(false);
+  const [rangeSalesError, setRangeSalesError] = useState<string | null>(null);
 
   const [autoSyncEnabled, setAutoSyncEnabledState] = useState<boolean>(() => {
     const saved = localStorage.getItem(AUTO_SYNC_STORAGE_KEY);
@@ -641,6 +650,58 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     return () => clearTimeout(timer);
   }, [items]);
 
+  // Fetch exact custom From-To date range sales from server daily buckets whenever a range filter is active
+  useEffect(() => {
+    if (!filters.salesPeriod.startsWith('range:')) {
+      setIsLoadingRangeSales(false);
+      setRangeSalesError(null);
+      return;
+    }
+
+    const rangeSpec = filters.salesPeriod.slice(6);
+    const [from, to] = rangeSpec.split('..');
+    if (!from || !to || from > to) return;
+
+    const csvUrl = convertGoogleSheetUrlToCsv(connectedSalesUrl) || connectedSalesUrl;
+    const expectedKey = `${csvUrl}|${rangeSpec}`;
+    if (rangeSalesData?.key === expectedKey) return;
+
+    const controller = new AbortController();
+    setIsLoadingRangeSales(true);
+    setRangeSalesError(null);
+
+    fetch(
+      `/api/sales-range?url=${encodeURIComponent(csvUrl)}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&_t=${Date.now()}`,
+      { cache: 'no-store', signal: controller.signal }
+    )
+      .then(async (res) => {
+        if (!res.ok) {
+          const errJson = await res.json().catch(() => null);
+          throw new Error(errJson?.error || `HTTP ${res.status} loading date range sales.`);
+        }
+        return res.json();
+      })
+      .then((data) => {
+        if (controller.signal.aborted) return;
+        setRangeSalesData({
+          key: expectedKey,
+          bySimplified: data.bySimplified || {},
+          activeDays: data.activeDays || 0,
+        });
+      })
+      .catch((err: any) => {
+        if (controller.signal.aborted || err?.name === 'AbortError') return;
+        setRangeSalesError(err?.message || 'Failed to load sales for selected date range.');
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) {
+          setIsLoadingRangeSales(false);
+        }
+      });
+
+    return () => controller.abort();
+  }, [filters.salesPeriod, connectedSalesUrl, rangeSalesData?.key]);
+
   // Fast sales lookup helpers keyed by normalized Simplified name
   const getItemSalesRecord = useCallback(
     (simplified: string): SalesRecord | null => {
@@ -652,11 +713,24 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
   const getItemSales = useCallback(
     (simplified: string, period?: SalesPeriod): number => {
-      if (!salesData || !simplified) return 0;
-      const rec = salesData.bySimplified[simplified.trim().toLowerCase()];
-      return getSalesValueForRecord(rec, period ?? filters.salesPeriod);
+      if (!simplified) return 0;
+      const activePeriod = period ?? filters.salesPeriod;
+      const normKey = simplified.trim().toLowerCase();
+
+      if (activePeriod.startsWith('range:')) {
+        const csvUrl = convertGoogleSheetUrlToCsv(connectedSalesUrl) || connectedSalesUrl;
+        const expectedKey = `${csvUrl}|${activePeriod.slice(6)}`;
+        if (rangeSalesData?.key === expectedKey) {
+          return rangeSalesData.bySimplified[normKey] || 0;
+        }
+        return 0;
+      }
+
+      if (!salesData) return 0;
+      const rec = salesData.bySimplified[normKey];
+      return getSalesValueForRecord(rec, activePeriod);
     },
-    [salesData, filters.salesPeriod]
+    [salesData, filters.salesPeriod, connectedSalesUrl, rangeSalesData]
   );
 
   // Extract unique categories, colors, and sizes (naturally sorted)
@@ -1048,6 +1122,8 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         setConnectedSalesUrl,
         isSyncingSales,
         salesSyncError,
+        isLoadingRangeSales,
+        rangeSalesError,
         syncSalesSheet,
         getItemSales,
         getItemSalesRecord,

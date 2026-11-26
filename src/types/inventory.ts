@@ -28,7 +28,14 @@ export interface InventoryItem {
 
 export type StockStatus = 'all' | 'in_stock' | 'low_stock' | 'out_of_stock' | 'reorder';
 
-export type SalesPeriod = '1m' | '3m' | '6m' | '12m' | 'all' | `month:${string}`;
+export type SalesPeriod =
+  | '1m'
+  | '3m'
+  | '6m'
+  | '12m'
+  | 'all'
+  | `month:${string}`
+  | `range:${string}..${string}`;
 
 export interface SalesRecord {
   name: string;

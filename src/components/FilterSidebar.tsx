@@ -21,12 +21,13 @@ export type FilterSectionKey =
   | 'sortBy'
   | 'status'
   | 'salesPeriod'
+  | 'dateRange'
   | 'salesActivity'
   | 'threshold';
 
 type AccordionState = Record<FilterSectionKey, boolean>;
 
-const ACCORDION_STORAGE_KEY = 'stocksync_sidebar_accordion_v2';
+const ACCORDION_STORAGE_KEY = 'stocksync_sidebar_accordion_v3';
 
 const DEFAULT_ACCORDION_STATE: AccordionState = {
   category: true,
@@ -35,6 +36,7 @@ const DEFAULT_ACCORDION_STATE: AccordionState = {
   sortBy: false,
   status: true,
   salesPeriod: true,
+  dateRange: true,
   salesActivity: false,
   threshold: false,
 };
@@ -386,6 +388,8 @@ export const FilterSidebar: React.FC<FilterSidebarProps> = ({
     sizes,
     salesData,
     isSyncingSales,
+    isLoadingRangeSales,
+    rangeSalesError,
     stats,
   } = useInventory();
 
@@ -422,6 +426,7 @@ export const FilterSidebar: React.FC<FilterSidebarProps> = ({
       sortBy: true,
       status: true,
       salesPeriod: true,
+      dateRange: true,
       salesActivity: true,
       threshold: true,
     });
@@ -435,10 +440,61 @@ export const FilterSidebar: React.FC<FilterSidebarProps> = ({
       sortBy: false,
       status: false,
       salesPeriod: false,
+      dateRange: false,
       salesActivity: false,
       threshold: false,
     });
   };
+
+  const isCustomRangeActive = filters.salesPeriod.startsWith('range:');
+  const activeRangeParts = isCustomRangeActive ? filters.salesPeriod.slice(6).split('..') : ['', ''];
+  const [draftFromDate, setDraftFromDate] = useState<string>(activeRangeParts[0] || '');
+  const [draftToDate, setDraftToDate] = useState<string>(activeRangeParts[1] || '');
+
+  useEffect(() => {
+    if (filters.salesPeriod.startsWith('range:')) {
+      const [f, t] = filters.salesPeriod.slice(6).split('..');
+      setDraftFromDate(f || '');
+      setDraftToDate(t || '');
+    } else {
+      setDraftFromDate('');
+      setDraftToDate('');
+    }
+  }, [filters.salesPeriod]);
+
+  const applyDateRange = (nextFrom: string, nextTo: string) => {
+    setDraftFromDate(nextFrom);
+    setDraftToDate(nextTo);
+    if (nextFrom && nextTo && nextFrom <= nextTo) {
+      setFilters((p) => ({
+        ...p,
+        salesPeriod: `range:${nextFrom}..${nextTo}`,
+      }));
+    }
+  };
+
+  const applyRelativeMonthsRange = (months: number) => {
+    if (!salesData?.maxDate) return;
+    const endDate = new Date(`${salesData.maxDate}T00:00:00Z`);
+    if (Number.isNaN(endDate.getTime())) return;
+    const startDate = new Date(endDate);
+    startDate.setUTCMonth(startDate.getUTCMonth() - months);
+    startDate.setUTCDate(startDate.getUTCDate() + 1);
+    const minMs = salesData.minDate ? Date.parse(`${salesData.minDate}T00:00:00Z`) : 0;
+    const finalStart =
+      minMs && startDate.getTime() < minMs ? salesData.minDate : startDate.toISOString().slice(0, 10);
+    applyDateRange(finalStart, salesData.maxDate);
+  };
+
+  const clearDateRange = () => {
+    setDraftFromDate('');
+    setDraftToDate('');
+    if (filters.salesPeriod.startsWith('range:')) {
+      setFilters((p) => ({ ...p, salesPeriod: '3m' }));
+    }
+  };
+
+  const isInvalidRange = Boolean(draftFromDate && draftToDate && draftFromDate > draftToDate);
 
   const activePeriodLabel = formatSalesPeriodLabel(filters.salesPeriod);
   const selectedMonthValue = filters.salesPeriod.startsWith('month:')
@@ -704,10 +760,109 @@ export const FilterSidebar: React.FC<FilterSidebarProps> = ({
               <div className="flex items-center justify-between">
                 <span>{activePeriodLabel} filtered total:</span>
                 <span className="font-mono font-medium text-[var(--text-primary)]">
-                  {isSyncingSales ? 'Loading...' : `${stats.filteredSalesTotal.toLocaleString()} units`}
+                  {isSyncingSales || isLoadingRangeSales
+                    ? 'Loading...'
+                    : `${stats.filteredSalesTotal.toLocaleString()} units`}
                 </span>
               </div>
             </div>
+          </div>
+        </AccordionSection>
+
+        {/* 4. Custom Date Range */}
+        <AccordionSection
+          title="Date Range"
+          isOpen={openSections.dateRange}
+          onToggle={() => toggleSection('dateRange')}
+          activeBadge={isCustomRangeActive ? activePeriodLabel : null}
+          isHighlighted={isCustomRangeActive}
+        >
+          <div className="space-y-2">
+            <div className="grid grid-cols-2 gap-1.5">
+              <div>
+                <label className="block text-[11px] text-[var(--text-muted)] mb-1">From</label>
+                <input
+                  type="date"
+                  value={draftFromDate}
+                  min={salesData?.minDate || undefined}
+                  max={draftToDate || salesData?.maxDate || undefined}
+                  onChange={(e) => applyDateRange(e.target.value, draftToDate)}
+                  className={`w-full rounded-lg px-2 py-1.5 text-[11px] border focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-[var(--accent)] transition-colors duration-150 ${
+                    isCustomRangeActive
+                      ? 'bg-[var(--accent-soft)] border-[var(--accent)] text-[var(--accent)] font-medium'
+                      : 'bg-[var(--card-bg)] border-[var(--border)] text-[var(--text-primary)] font-normal'
+                  }`}
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] text-[var(--text-muted)] mb-1">To</label>
+                <input
+                  type="date"
+                  value={draftToDate}
+                  min={draftFromDate || salesData?.minDate || undefined}
+                  max={salesData?.maxDate || undefined}
+                  onChange={(e) => applyDateRange(draftFromDate, e.target.value)}
+                  className={`w-full rounded-lg px-2 py-1.5 text-[11px] border focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-[var(--accent)] transition-colors duration-150 ${
+                    isCustomRangeActive
+                      ? 'bg-[var(--accent-soft)] border-[var(--accent)] text-[var(--accent)] font-medium'
+                      : 'bg-[var(--card-bg)] border-[var(--border)] text-[var(--text-primary)] font-normal'
+                  }`}
+                />
+              </div>
+            </div>
+
+            {/* Quick Custom Date Range Shortcuts */}
+            <div className="flex items-center justify-between gap-1 pt-0.5">
+              <div className="flex items-center gap-1 flex-wrap">
+                {[
+                  { label: '3M', months: 3 },
+                  { label: '6M', months: 6 },
+                  { label: '12M', months: 12 },
+                ].map((quick) => (
+                  <button
+                    key={quick.label}
+                    type="button"
+                    disabled={!salesData?.maxDate}
+                    onClick={() => applyRelativeMonthsRange(quick.months)}
+                    className="px-2 py-0.5 rounded-md text-[11px] border border-[var(--border)] bg-[var(--surface-subtle)] hover:bg-[var(--accent-soft)] hover:text-[var(--accent)] hover:border-[var(--accent)] disabled:opacity-40 text-[var(--text-primary)] font-medium transition-colors duration-150"
+                    title={`Fill last ${quick.months} months by exact date`}
+                  >
+                    Last {quick.label}
+                  </button>
+                ))}
+              </div>
+
+              {(draftFromDate || draftToDate || isCustomRangeActive) && (
+                <button
+                  type="button"
+                  onClick={clearDateRange}
+                  className="text-[11px] font-medium text-[var(--accent)] hover:text-[var(--accent-hover)] transition-colors duration-150 shrink-0"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+
+            {isInvalidRange && (
+              <div className="text-[11px] font-medium text-[var(--accent)]">
+                From date must be on or before To date.
+              </div>
+            )}
+
+            {rangeSalesError && (
+              <div className="text-[11px] font-medium text-[var(--accent)]">{rangeSalesError}</div>
+            )}
+
+            {isCustomRangeActive && !rangeSalesError && (
+              <div className="flex items-center justify-between text-[11px] text-[var(--text-muted)] pt-0.5">
+                <span>Range total:</span>
+                <span className="font-mono font-medium text-[var(--accent)]">
+                  {isLoadingRangeSales
+                    ? 'Calculating...'
+                    : `${stats.filteredSalesTotal.toLocaleString()} units`}
+                </span>
+              </div>
+            )}
           </div>
         </AccordionSection>
 

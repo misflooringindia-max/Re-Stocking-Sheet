@@ -22,6 +22,24 @@ export function formatSalesPeriodLabel(period: string): string {
     }
     return ym;
   }
+  if (period.startsWith('range:')) {
+    const [fromStr, toStr] = period.slice(6).split('..');
+    const fmt = (iso: string, includeYear: boolean) => {
+      const [y, m, d] = (iso || '').split('-').map(Number);
+      if (!y || !m || !d) return iso;
+      const dt = new Date(Date.UTC(y, m - 1, d));
+      if (Number.isNaN(dt.getTime())) return iso;
+      return dt.toLocaleDateString('en-US', {
+        day: '2-digit',
+        month: 'short',
+        ...(includeYear ? { year: '2-digit' } : {}),
+        timeZone: 'UTC',
+      });
+    };
+    const sameYear = fromStr?.slice(0, 4) === toStr?.slice(0, 4);
+    if (fromStr === toStr) return fmt(fromStr, true);
+    return `${fmt(fromStr, !sameYear)} – ${fmt(toStr, true)}`;
+  }
   return period;
 }
 

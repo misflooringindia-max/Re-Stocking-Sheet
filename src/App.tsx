@@ -189,9 +189,10 @@ function DashboardContent() {
     if (filters.salesPeriod !== 'all') {
       chips.push({
         key: 'salesPeriod',
-        label:
-          SALES_CHIP_LABELS[filters.salesPeriod] ||
-          formatSalesPeriodLabel(filters.salesPeriod),
+        label: filters.salesPeriod.startsWith('range:')
+          ? `Date: ${formatSalesPeriodLabel(filters.salesPeriod)}`
+          : SALES_CHIP_LABELS[filters.salesPeriod] ||
+            formatSalesPeriodLabel(filters.salesPeriod),
         onRemove: () => setFilters((p) => ({ ...p, salesPeriod: 'all' })),
       });
     }
