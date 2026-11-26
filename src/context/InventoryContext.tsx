@@ -111,8 +111,9 @@ interface InventoryContextType {
 
 const DEFAULT_THRESHOLD = 15;
 const SALES_SUMMARY_SCHEMA_VERSION = 3;
-const LEGACY_SALES_SHEET_URL =
-  'https://docs.google.com/spreadsheets/d/e/2PACX-1vQDxz7MDyPeEDk6TFYU-vAeBPQT3rrZ6G3wXaL_4BQfKMphIBcdm2sbZS2DMYPD5pRbpENut1mI0ol3/pub?output=csv';
+const LEGACY_SALES_SHEET_ID =
+  '2PACX-1vQDxz7MDyPeEDk6TFYU-vAeBPQT3rrZ6G3wXaL_4BQfKMphIBcdm2sbZS2DMYPD5pRbpENut1mI0ol3';
+const DEFAULT_SALES_SHEET_ID = '1Xcyd7GOPosV2caGm-fj6ey3KlnvxkhmjcWkywsQVFeg';
 const SHEET_URL_STORAGE_KEY = 'stocksync_published_sheet_url';
 const SALES_URL_STORAGE_KEY = 'stocksync_sales_sheet_url';
 const AUTO_SYNC_STORAGE_KEY = 'stocksync_auto_sync_enabled';
@@ -121,8 +122,8 @@ const LAST_SYNC_TIME_KEY = 'stocksync_last_live_sync_time';
 function resolveInitialSalesUrl(): string {
   try {
     const saved = localStorage.getItem(SALES_URL_STORAGE_KEY)?.trim();
-    if (!saved || saved === LEGACY_SALES_SHEET_URL) {
-      if (saved === LEGACY_SALES_SHEET_URL) {
+    if (!saved || saved.includes(LEGACY_SALES_SHEET_ID)) {
+      if (saved && saved.includes(LEGACY_SALES_SHEET_ID)) {
         localStorage.setItem(SALES_URL_STORAGE_KEY, DEFAULT_SALES_SHEET_URL);
       }
       return DEFAULT_SALES_SHEET_URL;
@@ -500,21 +501,46 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         dailyBuckets: DailySalesBucket[];
         index: SalesConsumptionIndexPayload;
       }> => {
-        const res = await fetch(csvUrl, { cache: 'no-store' });
-        if (!res.ok) {
-          throw new Error(`HTTP ${res.status}`);
+        try {
+          const res = await fetch(csvUrl, { cache: 'no-store' });
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}`);
+          }
+          const text = await res.text();
+          if (
+            !text.trim() ||
+            text.trimStart().startsWith('<!DOCTYPE html') ||
+            text.trimStart().startsWith('<html')
+          ) {
+            throw new Error('Google Sheet returned HTML instead of CSV.');
+          }
+          const { summary, dailyBuckets } = aggregateSalesCsv(text);
+          const index = buildSalesConsumptionIndex(text);
+          return { summary, dailyBuckets, index };
+        } catch (directErr) {
+          // If direct CORS fetch fails on a static host and URL matches the known default sheet,
+          // load the bundled static sales snapshot so all metrics, filters, and date ranges still work
+          const isKnownDefaultSheet =
+            csvUrl.includes(DEFAULT_SALES_SHEET_ID) ||
+            rawUrl.includes(DEFAULT_SALES_SHEET_ID) ||
+            csvUrl.includes(LEGACY_SALES_SHEET_ID) ||
+            rawUrl.includes(LEGACY_SALES_SHEET_ID);
+
+          if (isKnownDefaultSheet) {
+            const snapRes = await fetch('/data/sales-snapshot.json', { cache: 'no-store' });
+            if (snapRes.ok) {
+              const snap = await snapRes.json();
+              if (snap?.summary?.bySimplified) {
+                return {
+                  summary: snap.summary,
+                  dailyBuckets: snap.dailyBuckets || [],
+                  index: snap.index,
+                };
+              }
+            }
+          }
+          throw directErr;
         }
-        const text = await res.text();
-        if (
-          !text.trim() ||
-          text.trimStart().startsWith('<!DOCTYPE html') ||
-          text.trimStart().startsWith('<html')
-        ) {
-          throw new Error('Google Sheet returned HTML instead of CSV.');
-        }
-        const { summary, dailyBuckets } = aggregateSalesCsv(text);
-        const index = buildSalesConsumptionIndex(text);
-        return { summary, dailyBuckets, index };
       };
 
       try {
@@ -821,7 +847,28 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         if (firstErr?.isNonJsonEndpointError || !firstErr?.status || firstErr.status >= 500) {
           await new Promise((r) => setTimeout(r, 1200));
           if (controller.signal.aborted) throw firstErr;
-          return requestRange();
+          try {
+            return await requestRange();
+          } catch (retryErr: any) {
+            if (
+              (retryErr?.isNonJsonEndpointError || retryErr?.status === 404) &&
+              (csvUrl.includes(DEFAULT_SALES_SHEET_ID) || csvUrl.includes(LEGACY_SALES_SHEET_ID))
+            ) {
+              const snapRes = await fetch('/data/sales-snapshot.json', {
+                cache: 'no-store',
+                signal: controller.signal,
+              });
+              if (snapRes.ok) {
+                const snap = await snapRes.json();
+                if (Array.isArray(snap?.dailyBuckets)) {
+                  setLocalDailyBuckets(snap.dailyBuckets);
+                  if (snap.index) setLocalSalesConsumptionIndex(snap.index);
+                  return computeRangeSalesFromBuckets(snap.dailyBuckets, from, to);
+                }
+              }
+            }
+            throw retryErr;
+          }
         }
         throw firstErr;
       })

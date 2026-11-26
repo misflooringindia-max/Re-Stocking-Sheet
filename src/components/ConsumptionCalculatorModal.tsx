@@ -163,6 +163,16 @@ export const ConsumptionCalculatorModal: React.FC<ConsumptionCalculatorModalProp
           } catch (retryErr: any) {
             if (localSalesConsumptionIndex) {
               data = localSalesConsumptionIndex;
+            } else if (
+              (retryErr?.isNonJsonEndpointError || retryErr?.status === 404) &&
+              (csvUrl.includes('1Xcyd7GOPosV2caGm-fj6ey3KlnvxkhmjcWkywsQVFeg') ||
+                csvUrl.includes('2PACX-1vQDxz7MDyPeEDk6TFYU-vAeBPQT3rrZ6G3wXaL_4BQfKMphIBcdm2sbZS2DMYPD5pRbpENut1mI0ol3'))
+            ) {
+              const snapRes = await fetch('/data/sales-snapshot.json', { cache: 'no-store' });
+              if (!snapRes.ok) throw retryErr;
+              const snap = await snapRes.json();
+              if (!snap?.index) throw retryErr;
+              data = snap.index as SalesConsumptionIndex;
             } else {
               throw retryErr;
             }
