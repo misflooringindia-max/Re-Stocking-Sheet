@@ -9,7 +9,7 @@ const __dirname = path.dirname(__filename);
 const PORT = 3000;
 
 const DEFAULT_SALES_CSV_URL =
-  'https://docs.google.com/spreadsheets/d/e/2PACX-1vQDxz7MDyPeEDk6TFYU-vAeBPQT3rrZ6G3wXaL_4BQfKMphIBcdm2sbZS2DMYPD5pRbpENut1mI0ol3/pub?output=csv';
+  'https://docs.google.com/spreadsheets/d/1Xcyd7GOPosV2caGm-fj6ey3KlnvxkhmjcWkywsQVFeg/export?format=csv&gid=2130481940';
 
 const MONTH_MAP: Record<string, number> = {
   january: 0,
@@ -70,7 +70,7 @@ interface SalesSummaryPayload {
 
 const salesCache = new Map<string, { timestamp: number; data: SalesSummaryPayload }>();
 const SALES_CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
-const SALES_SUMMARY_SCHEMA_VERSION = 2;
+const SALES_SUMMARY_SCHEMA_VERSION = 3;
 
 const STRICT_MONTH_MAP: Record<string, number> = {
   January: 1,
@@ -586,42 +586,59 @@ async function startServer() {
     }
   });
 
-  // Aggregated Sales Summary API (aggregates 290k+ sales rows per Simplified item on server)
-  app.get('/api/sales-summary', async (req: Request, res: Response) => {
-    const rawUrl =
-      typeof req.query.url === 'string' && req.query.url.trim()
-        ? req.query.url.trim()
-        : DEFAULT_SALES_CSV_URL;
-    const forceRefresh = req.query.refresh === '1' || req.query.refresh === 'true';
-
-    let parsed: URL;
-    try {
-      parsed = new URL(rawUrl);
-    } catch {
-      res.status(400).json({ error: 'Invalid sales sheet URL format' });
-      return;
-    }
-
+  function normalizeSalesSheetCsvUrl(raw: string): URL {
+    const parsed = new URL(raw);
     if (
       parsed.protocol !== 'https:' ||
       parsed.hostname !== 'docs.google.com' ||
       !parsed.pathname.startsWith('/spreadsheets/')
     ) {
-      res.status(403).json({
-        error: 'Only https://docs.google.com/spreadsheets/ links are allowed.',
-      });
-      return;
+      const err: any = new Error('Only https://docs.google.com/spreadsheets/ links are allowed.');
+      err.statusCode = 403;
+      throw err;
     }
 
-    const cacheKey = parsed.toString();
-    const cached = salesCache.get(cacheKey);
-    if (!forceRefresh && cached && Date.now() - cached.timestamp < SALES_CACHE_TTL_MS) {
-      res.setHeader('Cache-Control', 'no-store');
-      res.status(200).json(cached.data);
-      return;
+    if (parsed.pathname.includes('/spreadsheets/d/e/')) {
+      const pubMatch = parsed.pathname.match(/\/spreadsheets\/d\/e\/([a-zA-Z0-9-_]+)/);
+      if (pubMatch && pubMatch[1]) {
+        const params = new URLSearchParams();
+        const gid = parsed.searchParams.get('gid');
+        const single = parsed.searchParams.get('single');
+        if (gid) params.set('gid', gid);
+        if (single) params.set('single', single);
+        params.set('output', 'csv');
+        return new URL(`https://docs.google.com/spreadsheets/d/e/${pubMatch[1]}/pub?${params.toString()}`);
+      }
+    } else {
+      const idMatch = parsed.pathname.match(/\/spreadsheets(?:\/u\/\d+)?\/d\/([a-zA-Z0-9-_]+)/);
+      if (idMatch && idMatch[1]) {
+        let gid = parsed.searchParams.get('gid');
+        if (!gid && parsed.hash) {
+          const hashMatch = parsed.hash.match(/gid=([0-9]+)/);
+          if (hashMatch) gid = hashMatch[1];
+        }
+        const exportUrl = gid
+          ? `https://docs.google.com/spreadsheets/d/${idMatch[1]}/export?format=csv&gid=${gid}`
+          : `https://docs.google.com/spreadsheets/d/${idMatch[1]}/export?format=csv`;
+        return new URL(exportUrl);
+      }
     }
 
-    try {
+    return parsed;
+  }
+
+  const inFlightSalesLoads = new Map<
+    string,
+    Promise<{ summary: SalesSummaryPayload; index: SalesConsumptionIndexPayload }>
+  >();
+
+  async function fetchAndBuildSales(
+    cacheKey: string
+  ): Promise<{ summary: SalesSummaryPayload; index: SalesConsumptionIndexPayload }> {
+    const existing = inFlightSalesLoads.get(cacheKey);
+    if (existing) return existing;
+
+    const promise = (async () => {
       const response = await fetch(cacheKey, {
         method: 'GET',
         redirect: 'follow',
@@ -632,10 +649,9 @@ async function startServer() {
       });
 
       if (!response.ok) {
-        res.status(response.status).json({
-          error: `Google Sheets returned HTTP ${response.status}`,
-        });
-        return;
+        const err: any = new Error(`Google Sheets returned HTTP ${response.status}`);
+        err.statusCode = response.status;
+        throw err;
       }
 
       const text = await response.text();
@@ -644,27 +660,62 @@ async function startServer() {
         text.trimStart().startsWith('<html') ||
         text.includes('Sign in - Google Accounts')
       ) {
-        res.status(403).json({
-          error:
-            'This Sales Google Sheet is not publicly accessible. Please publish to web as CSV or allow Anyone with the link to view.',
-        });
-        return;
+        const err: any = new Error(
+          'This Sales Google Sheet is not publicly accessible. Please publish to web as CSV or allow Anyone with the link to view.'
+        );
+        err.statusCode = 403;
+        throw err;
       }
 
       const summary = aggregateSalesCsv(text);
-      salesCache.set(cacheKey, { timestamp: Date.now(), data: summary });
+      const index = buildSalesConsumptionIndex(text);
+      const now = Date.now();
+      salesCache.set(cacheKey, { timestamp: now, data: summary });
+      consumptionIndexCache.set(cacheKey, { timestamp: now, data: index });
+      return { summary, index };
+    })().finally(() => {
+      inFlightSalesLoads.delete(cacheKey);
+    });
 
-      try {
-        const idxPayload = buildSalesConsumptionIndex(text);
-        consumptionIndexCache.set(cacheKey, { timestamp: Date.now(), data: idxPayload });
-      } catch {
-        // Ignore secondary index error
+    inFlightSalesLoads.set(cacheKey, promise);
+    return promise;
+  }
+
+  // Aggregated Sales Summary API (aggregates 290k+ sales rows per Simplified item on server)
+  app.get('/api/sales-summary', async (req: Request, res: Response) => {
+    const rawUrl =
+      typeof req.query.url === 'string' && req.query.url.trim()
+        ? req.query.url.trim()
+        : DEFAULT_SALES_CSV_URL;
+    const forceRefresh = req.query.refresh === '1' || req.query.refresh === 'true';
+
+    let parsed: URL;
+    try {
+      parsed = normalizeSalesSheetCsvUrl(rawUrl);
+    } catch (err: any) {
+      res.status(err?.statusCode || 400).json({ error: err?.message || 'Invalid sales sheet URL format' });
+      return;
+    }
+
+    const cacheKey = parsed.toString();
+    const cached = salesCache.get(cacheKey);
+    if (!forceRefresh && cached) {
+      const isFresh = Date.now() - cached.timestamp < SALES_CACHE_TTL_MS;
+      if (!isFresh) {
+        // Stale-while-revalidate: serve immediately and refresh in background
+        fetchAndBuildSales(cacheKey).catch(() => {});
       }
+      res.setHeader('Cache-Control', 'no-store');
+      res.status(200).json(cached.data);
+      return;
+    }
 
+    try {
+      const { summary } = await fetchAndBuildSales(cacheKey);
       res.setHeader('Cache-Control', 'no-store');
       res.status(200).json(summary);
     } catch (err: any) {
-      res.status(502).json({
+      res.status(err?.statusCode || 502).json({
         error: err?.message || 'Failed to fetch and aggregate sales CSV from Google.',
       });
     }
@@ -680,68 +731,30 @@ async function startServer() {
 
     let parsed: URL;
     try {
-      parsed = new URL(rawUrl);
-    } catch {
-      res.status(400).json({ error: 'Invalid sales sheet URL format' });
-      return;
-    }
-
-    if (
-      parsed.protocol !== 'https:' ||
-      parsed.hostname !== 'docs.google.com' ||
-      !parsed.pathname.startsWith('/spreadsheets/')
-    ) {
-      res.status(403).json({
-        error: 'Only https://docs.google.com/spreadsheets/ links are allowed.',
-      });
+      parsed = normalizeSalesSheetCsvUrl(rawUrl);
+    } catch (err: any) {
+      res.status(err?.statusCode || 400).json({ error: err?.message || 'Invalid sales sheet URL format' });
       return;
     }
 
     const cacheKey = parsed.toString();
     const cached = consumptionIndexCache.get(cacheKey);
-    if (!forceRefresh && cached && Date.now() - cached.timestamp < SALES_CACHE_TTL_MS) {
+    if (!forceRefresh && cached) {
+      const isFresh = Date.now() - cached.timestamp < SALES_CACHE_TTL_MS;
+      if (!isFresh) {
+        fetchAndBuildSales(cacheKey).catch(() => {});
+      }
       res.setHeader('Cache-Control', 'no-store');
       res.status(200).json(cached.data);
       return;
     }
 
     try {
-      const response = await fetch(cacheKey, {
-        method: 'GET',
-        redirect: 'follow',
-        headers: {
-          'User-Agent': 'StockSync-Inventory-Dashboard/1.0',
-          Accept: 'text/csv,text/plain,*/*',
-        },
-      });
-
-      if (!response.ok) {
-        res.status(response.status).json({
-          error: `Google Sheets returned HTTP ${response.status}`,
-        });
-        return;
-      }
-
-      const text = await response.text();
-      if (
-        text.trimStart().startsWith('<!DOCTYPE html') ||
-        text.trimStart().startsWith('<html') ||
-        text.includes('Sign in - Google Accounts')
-      ) {
-        res.status(403).json({
-          error:
-            'This Sales Google Sheet is not publicly accessible. Please publish to web as CSV or allow Anyone with the link to view.',
-        });
-        return;
-      }
-
-      const idxPayload = buildSalesConsumptionIndex(text);
-      consumptionIndexCache.set(cacheKey, { timestamp: Date.now(), data: idxPayload });
-
+      const { index } = await fetchAndBuildSales(cacheKey);
       res.setHeader('Cache-Control', 'no-store');
-      res.status(200).json(idxPayload);
+      res.status(200).json(index);
     } catch (err: any) {
-      res.status(502).json({
+      res.status(err?.statusCode || 502).json({
         error: err?.message || 'Failed to fetch sales CSV for consumption calculation.',
       });
     }
@@ -764,6 +777,16 @@ async function startServer() {
 
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on http://0.0.0.0:${PORT}`);
+    // Pre-warm default sales sheet cache immediately on server startup
+    fetchAndBuildSales(DEFAULT_SALES_CSV_URL)
+      .then(({ summary }) => {
+        console.log(
+          `Pre-warmed sales cache: ${summary.totalRows.toLocaleString()} rows across ${summary.uniqueSimplified.toLocaleString()} Simplified SKUs`
+        );
+      })
+      .catch((err) => {
+        console.warn('Initial sales cache pre-warm failed:', err?.message || err);
+      });
   });
 }
 

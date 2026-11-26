@@ -112,9 +112,12 @@ export const ImportSheetBanner: React.FC<ImportSheetBannerProps> = ({ onOpenSync
         </div>
         <div className="flex items-center gap-3">
           {(syncError || salesSyncError) && (
-            <span className="text-[var(--text-primary)] font-medium flex items-center gap-1">
+            <span
+              title={salesSyncError || syncError || undefined}
+              className="text-[var(--text-primary)] font-medium flex items-center gap-1"
+            >
               <AlertCircle className="w-3.5 h-3.5 text-[var(--text-muted)]" />
-              <span>Sync error</span>
+              <span>{salesSyncError ? 'Sales sync error' : 'Sync error'}</span>
             </span>
           )}
           <button

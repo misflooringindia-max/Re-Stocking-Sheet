@@ -44,6 +44,7 @@ export interface SalesRecord {
 
 export interface SalesSummaryData {
   schemaVersion?: number;
+  sourceUrl?: string;
   bySimplified: Record<string, SalesRecord>;
   totalRows: number;
   totalUnits: number;

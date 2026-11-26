@@ -99,11 +99,28 @@ interface InventoryContextType {
 }
 
 const DEFAULT_THRESHOLD = 15;
-const SALES_SUMMARY_SCHEMA_VERSION = 2;
+const SALES_SUMMARY_SCHEMA_VERSION = 3;
+const LEGACY_SALES_SHEET_URL =
+  'https://docs.google.com/spreadsheets/d/e/2PACX-1vQDxz7MDyPeEDk6TFYU-vAeBPQT3rrZ6G3wXaL_4BQfKMphIBcdm2sbZS2DMYPD5pRbpENut1mI0ol3/pub?output=csv';
 const SHEET_URL_STORAGE_KEY = 'stocksync_published_sheet_url';
 const SALES_URL_STORAGE_KEY = 'stocksync_sales_sheet_url';
 const AUTO_SYNC_STORAGE_KEY = 'stocksync_auto_sync_enabled';
 const LAST_SYNC_TIME_KEY = 'stocksync_last_live_sync_time';
+
+function resolveInitialSalesUrl(): string {
+  try {
+    const saved = localStorage.getItem(SALES_URL_STORAGE_KEY)?.trim();
+    if (!saved || saved === LEGACY_SALES_SHEET_URL) {
+      if (saved === LEGACY_SALES_SHEET_URL) {
+        localStorage.setItem(SALES_URL_STORAGE_KEY, DEFAULT_SALES_SHEET_URL);
+      }
+      return DEFAULT_SALES_SHEET_URL;
+    }
+    return saved;
+  } catch {
+    return DEFAULT_SALES_SHEET_URL;
+  }
+}
 
 const InventoryContext = createContext<InventoryContextType | null>(null);
 
@@ -327,9 +344,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const [connectedSheetUrl, setConnectedSheetUrlState] = useState<string>(
     () => localStorage.getItem(SHEET_URL_STORAGE_KEY) || DEFAULT_PUBLISHED_SHEET_URL
   );
-  const [connectedSalesUrl, setConnectedSalesUrlState] = useState<string>(
-    () => localStorage.getItem(SALES_URL_STORAGE_KEY) || DEFAULT_SALES_SHEET_URL
-  );
+  const [connectedSalesUrl, setConnectedSalesUrlState] = useState<string>(resolveInitialSalesUrl);
   const [salesData, setSalesData] = useState<SalesSummaryData | null>(null);
   const [isSyncingSales, setIsSyncingSales] = useState<boolean>(false);
   const [salesSyncError, setSalesSyncError] = useState<string | null>(null);
@@ -384,7 +399,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     };
   }, []);
 
-  // Sync Sales Summary from server-side aggregator
+  // Sync Sales Summary from server-side aggregator (with automatic retry for transient errors)
   const syncSalesSheet = useCallback(
     async (salesUrl?: string, options?: SalesSyncOptions): Promise<SalesSyncResult> => {
       const rawUrl = (salesUrl ?? connectedSalesUrl).trim();
@@ -395,10 +410,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       const csvUrl = convertGoogleSheetUrlToCsv(rawUrl) || rawUrl;
       const forceRefresh = options?.forceRefresh ?? false;
 
-      try {
-        setIsSyncingSales(true);
-        setSalesSyncError(null);
-
+      const attemptFetch = async (): Promise<SalesSummaryData> => {
         const endpoint = `/api/sales-summary?url=${encodeURIComponent(csvUrl)}${
           forceRefresh ? '&refresh=1' : ''
         }&_t=${Date.now()}`;
@@ -406,12 +418,34 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
         if (!res.ok) {
           const errJson = await res.json().catch(() => null);
-          throw new Error(errJson?.error || `HTTP ${res.status} while syncing sales sheet.`);
+          const err: any = new Error(errJson?.error || `HTTP ${res.status} while syncing sales sheet.`);
+          err.status = res.status;
+          throw err;
+        }
+        return res.json();
+      };
+
+      try {
+        setIsSyncingSales(true);
+        setSalesSyncError(null);
+
+        let data: SalesSummaryData;
+        try {
+          data = await attemptFetch();
+        } catch (firstErr: any) {
+          if (firstErr?.status && firstErr.status >= 400 && firstErr.status < 500) {
+            throw firstErr;
+          }
+          await new Promise((r) => setTimeout(r, 1500));
+          data = await attemptFetch();
         }
 
-        const data: SalesSummaryData = await res.json();
-        setSalesData(data);
-        saveSalesSummaryToDb(data).catch(() => {});
+        const payloadWithSource: SalesSummaryData = {
+          ...data,
+          sourceUrl: csvUrl,
+        };
+        setSalesData(payloadWithSource);
+        saveSalesSummaryToDb(payloadWithSource).catch(() => {});
 
         if (salesUrl && salesUrl.trim() !== connectedSalesUrl) {
           setConnectedSalesUrl(salesUrl.trim());
@@ -521,6 +555,10 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       let loadedCount = 0;
       let hasCachedSales = false;
 
+      const activeUrl = localStorage.getItem(SHEET_URL_STORAGE_KEY) || DEFAULT_PUBLISHED_SHEET_URL;
+      const activeSalesUrl = resolveInitialSalesUrl();
+      const normalizedSalesCsvUrl = convertGoogleSheetUrlToCsv(activeSalesUrl) || activeSalesUrl;
+
       try {
         setIsLoading(true);
         setLoadingMessage('Restoring inventory records from offline storage...');
@@ -530,7 +568,8 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         ]);
 
         const hasFreshSchema = cachedSales?.schemaVersion === SALES_SUMMARY_SCHEMA_VERSION;
-        if (isMounted && cachedSales && cachedSales.bySimplified && hasFreshSchema) {
+        const matchesSource = !cachedSales?.sourceUrl || cachedSales.sourceUrl === normalizedSalesCsvUrl;
+        if (isMounted && cachedSales && cachedSales.bySimplified && hasFreshSchema && matchesSource) {
           setSalesData(cachedSales);
           hasCachedSales = true;
         }
@@ -555,18 +594,15 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         }
       }
 
-      const activeUrl = localStorage.getItem(SHEET_URL_STORAGE_KEY) || DEFAULT_PUBLISHED_SHEET_URL;
-      const activeSalesUrl = localStorage.getItem(SALES_URL_STORAGE_KEY) || DEFAULT_SALES_SHEET_URL;
-
       const isOnlineNow = typeof navigator !== 'undefined' && navigator.onLine;
       const shouldAutoSyncStock =
         isOnlineNow && Boolean(activeUrl) && (autoSyncEnabled || loadedCount <= 400);
       const shouldAutoSyncSales =
         isOnlineNow && Boolean(activeSalesUrl) && (autoSyncEnabled || !hasCachedSales);
 
-      // Start sales sync non-blocking in background so UI opens quickly
+      // Start sales sync immediately using server's pre-warmed cache (no forced refresh on startup)
       if (shouldAutoSyncSales && isMounted) {
-        syncSalesSheet(activeSalesUrl, { forceRefresh: !hasCachedSales }).catch(() => {});
+        syncSalesSheet(activeSalesUrl, { forceRefresh: false }).catch(() => {});
       }
 
       if (shouldAutoSyncStock && isMounted) {

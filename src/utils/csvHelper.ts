@@ -5,7 +5,7 @@ export const DEFAULT_PUBLISHED_SHEET_URL =
   'https://docs.google.com/spreadsheets/d/e/2PACX-1vT-1JU1iWrr58Z3VMEBRAqTeovKDVUKnaete2bYvhjHJzccdiTyYF_BPGTGFqLkGn1K9YByc6bekdd0/pub?output=csv';
 
 export const DEFAULT_SALES_SHEET_URL =
-  'https://docs.google.com/spreadsheets/d/e/2PACX-1vQDxz7MDyPeEDk6TFYU-vAeBPQT3rrZ6G3wXaL_4BQfKMphIBcdm2sbZS2DMYPD5pRbpENut1mI0ol3/pub?output=csv';
+  'https://docs.google.com/spreadsheets/d/1Xcyd7GOPosV2caGm-fj6ey3KlnvxkhmjcWkywsQVFeg/export?format=csv&gid=2130481940';
 
 export function formatSalesPeriodLabel(period: string): string {
   if (period === '1m') return '1M';
