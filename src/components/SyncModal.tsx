@@ -39,6 +39,7 @@ export const SyncModal: React.FC<SyncModalProps> = ({ isOpen, onClose }) => {
     isSyncingSales,
     salesSyncError,
     syncSalesSheet,
+    importSalesCsvData,
     autoSyncEnabled,
     setAutoSyncEnabled,
     isSyncing,
@@ -155,6 +156,32 @@ export const SyncModal: React.FC<SyncModalProps> = ({ isOpen, onClose }) => {
       }
     };
     reader.readAsText(file);
+  };
+
+  const handleSalesFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsSalesError(false);
+    setSalesStatus(`Reading ${file.name}...`);
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const content = event.target?.result as string;
+      if (content) {
+        const res = importSalesCsvData(content, `CSV: ${file.name}`);
+        if (res.success) {
+          setIsSalesError(false);
+          setSalesStatus(
+            `Loaded ${res.rows.toLocaleString()} sales rows across ${res.uniqueSimplified.toLocaleString()} Simplified products.`
+          );
+        } else {
+          setIsSalesError(true);
+          setSalesStatus(res.error || 'Invalid Sales CSV format.');
+        }
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
   };
 
   const formattedLastSync = (() => {
@@ -350,6 +377,17 @@ export const SyncModal: React.FC<SyncModalProps> = ({ isOpen, onClose }) => {
                   />
                   <span>{isSyncingSales ? 'Syncing sales...' : 'Sync sales sheet'}</span>
                 </button>
+
+                <label className="cursor-pointer px-3.5 py-2 rounded-lg bg-[var(--card-bg)] hover:bg-[var(--table-hover)] text-[var(--text-primary)] text-[13px] font-medium flex items-center justify-center gap-2 border border-[var(--border)] transition-colors duration-150">
+                  <Upload className="w-3.5 h-3.5 text-[var(--text-muted)]" />
+                  <span>Upload Sales CSV</span>
+                  <input
+                    type="file"
+                    accept=".csv,.txt"
+                    onChange={handleSalesFileUpload}
+                    className="hidden"
+                  />
+                </label>
               </div>
             </form>
 

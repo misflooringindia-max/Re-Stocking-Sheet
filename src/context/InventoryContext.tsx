@@ -21,6 +21,13 @@ import {
   saveSalesSummaryToDb,
   loadSalesSummaryFromDb,
 } from '../utils/db';
+import {
+  aggregateSalesCsv,
+  buildSalesConsumptionIndex,
+  computeRangeSalesFromBuckets,
+  DailySalesBucket,
+  SalesConsumptionIndexPayload,
+} from '../utils/salesAggregation';
 import initialCsvRaw from '../data/initialData.csv?raw';
 
 interface SyncOptions {
@@ -68,6 +75,8 @@ interface InventoryContextType {
   isLoadingRangeSales: boolean;
   rangeSalesError: string | null;
   syncSalesSheet: (salesUrl?: string, options?: SalesSyncOptions) => Promise<SalesSyncResult>;
+  importSalesCsvData: (csvContent: string, sourceLabel?: string) => SalesSyncResult;
+  localSalesConsumptionIndex: SalesConsumptionIndexPayload | null;
   getItemSales: (simplified: string, period?: SalesPeriod) => number;
   getItemSalesRecord: (simplified: string) => SalesRecord | null;
   autoSyncEnabled: boolean;
@@ -357,6 +366,9 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   } | null>(null);
   const [isLoadingRangeSales, setIsLoadingRangeSales] = useState<boolean>(false);
   const [rangeSalesError, setRangeSalesError] = useState<string | null>(null);
+  const [localDailyBuckets, setLocalDailyBuckets] = useState<DailySalesBucket[] | null>(null);
+  const [localSalesConsumptionIndex, setLocalSalesConsumptionIndex] =
+    useState<SalesConsumptionIndexPayload | null>(null);
 
   const [autoSyncEnabled, setAutoSyncEnabledState] = useState<boolean>(() => {
     const saved = localStorage.getItem(AUTO_SYNC_STORAGE_KEY);
@@ -408,7 +420,48 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     };
   }, []);
 
-  // Sync Sales Summary from server-side aggregator (with automatic retry for transient errors)
+  // Import Sales CSV directly from local file upload (offline / static fallback)
+  const importSalesCsvData = useCallback(
+    (csvContent: string, sourceLabel = 'Uploaded Sales CSV'): SalesSyncResult => {
+      try {
+        if (!csvContent || !csvContent.trim()) {
+          return { success: false, rows: 0, uniqueSimplified: 0, error: 'Sales CSV file is empty.' };
+        }
+        const { summary, dailyBuckets } = aggregateSalesCsv(csvContent);
+        const index = buildSalesConsumptionIndex(csvContent);
+        if (summary.totalRows === 0) {
+          return {
+            success: false,
+            rows: 0,
+            uniqueSimplified: 0,
+            error: 'No valid sales rows found in provided CSV.',
+          };
+        }
+        const payloadWithSource: SalesSummaryData = {
+          ...summary,
+          sourceUrl: sourceLabel,
+        };
+        setSalesData(payloadWithSource);
+        setLocalDailyBuckets(dailyBuckets);
+        setLocalSalesConsumptionIndex(index);
+        setSalesSyncError(null);
+        setRangeSalesData(null);
+        saveSalesSummaryToDb(payloadWithSource).catch(() => {});
+        return {
+          success: true,
+          rows: summary.totalRows,
+          uniqueSimplified: summary.uniqueSimplified,
+        };
+      } catch (err: any) {
+        const msg = err?.message || 'Failed to parse sales CSV file.';
+        setSalesSyncError(msg);
+        return { success: false, rows: 0, uniqueSimplified: 0, error: msg };
+      }
+    },
+    []
+  );
+
+  // Sync Sales Summary from server-side aggregator (with retry + static/fallback handling)
   const syncSalesSheet = useCallback(
     async (salesUrl?: string, options?: SalesSyncOptions): Promise<SalesSyncResult> => {
       const rawUrl = (salesUrl ?? connectedSalesUrl).trim();
@@ -419,41 +472,104 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       const csvUrl = convertGoogleSheetUrlToCsv(rawUrl) || rawUrl;
       const forceRefresh = options?.forceRefresh ?? false;
 
-      const attemptFetch = async (): Promise<SalesSummaryData> => {
+      const attemptFetch = async (): Promise<{
+        summary: SalesSummaryData;
+        dailyBuckets?: DailySalesBucket[];
+        index?: SalesConsumptionIndexPayload;
+      }> => {
         const endpoint = `/api/sales-summary?url=${encodeURIComponent(csvUrl)}${
           forceRefresh ? '&refresh=1' : ''
         }&_t=${Date.now()}`;
         const res = await fetch(endpoint, { cache: 'no-store' });
 
         if (!res.ok) {
-          const errJson = await res.json().catch(() => null);
+          const contentType = res.headers.get('content-type') || '';
+          const isJson = contentType.includes('application/json');
+          const errJson = isJson ? await res.json().catch(() => null) : null;
           const err: any = new Error(errJson?.error || `HTTP ${res.status} while syncing sales sheet.`);
           err.status = res.status;
+          err.isNonJsonEndpointError = !isJson;
           throw err;
         }
-        return res.json();
+        const json = await res.json();
+        return { summary: json };
+      };
+
+      const attemptDirectClientFallback = async (): Promise<{
+        summary: SalesSummaryData;
+        dailyBuckets: DailySalesBucket[];
+        index: SalesConsumptionIndexPayload;
+      }> => {
+        const res = await fetch(csvUrl, { cache: 'no-store' });
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status}`);
+        }
+        const text = await res.text();
+        if (
+          !text.trim() ||
+          text.trimStart().startsWith('<!DOCTYPE html') ||
+          text.trimStart().startsWith('<html')
+        ) {
+          throw new Error('Google Sheet returned HTML instead of CSV.');
+        }
+        const { summary, dailyBuckets } = aggregateSalesCsv(text);
+        const index = buildSalesConsumptionIndex(text);
+        return { summary, dailyBuckets, index };
       };
 
       try {
         setIsSyncingSales(true);
         setSalesSyncError(null);
 
-        let data: SalesSummaryData;
+        let result: {
+          summary: SalesSummaryData;
+          dailyBuckets?: DailySalesBucket[];
+          index?: SalesConsumptionIndexPayload;
+        };
+
         try {
-          data = await attemptFetch();
+          result = await attemptFetch();
         } catch (firstErr: any) {
-          if (firstErr?.status && firstErr.status >= 400 && firstErr.status < 500) {
+          // Do not retry deterministic JSON 4xx errors (e.g. 400 invalid URL, 403 private sheet)
+          if (
+            firstErr?.status &&
+            firstErr.status >= 400 &&
+            firstErr.status < 500 &&
+            !firstErr.isNonJsonEndpointError &&
+            firstErr.status !== 429
+          ) {
             throw firstErr;
           }
+
+          // Retry once after 1.5s (covers transient 5xx or non-JSON 404 during server restart)
           await new Promise((r) => setTimeout(r, 1500));
-          data = await attemptFetch();
+          try {
+            result = await attemptFetch();
+          } catch (retryErr: any) {
+            // If backend endpoint is still unreachable / non-JSON 404 (e.g. static host), try direct client fetch
+            if (retryErr?.isNonJsonEndpointError || retryErr?.status === 404) {
+              try {
+                result = await attemptDirectClientFallback();
+              } catch {
+                throw new Error(
+                  'Sales sync server endpoint (/api/sales-summary) returned HTTP 404. Please refresh in a few seconds, or use Upload Sales CSV below.'
+                );
+              }
+            } else {
+              throw retryErr;
+            }
+          }
         }
 
         const payloadWithSource: SalesSummaryData = {
-          ...data,
+          ...result.summary,
           sourceUrl: csvUrl,
         };
         setSalesData(payloadWithSource);
+        setLocalDailyBuckets(result.dailyBuckets ?? null);
+        if (result.index) {
+          setLocalSalesConsumptionIndex(result.index);
+        }
         saveSalesSummaryToDb(payloadWithSource).catch(() => {});
 
         if (salesUrl && salesUrl.trim() !== connectedSalesUrl) {
@@ -462,8 +578,8 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
         return {
           success: true,
-          rows: data.totalRows,
-          uniqueSimplified: data.uniqueSimplified,
+          rows: result.summary.totalRows,
+          uniqueSimplified: result.summary.uniqueSimplified,
         };
       } catch (err: any) {
         const msg = err?.message || 'Failed to sync sales Google Sheet.';
@@ -650,7 +766,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     return () => clearTimeout(timer);
   }, [items]);
 
-  // Fetch exact custom From-To date range sales from server daily buckets whenever a range filter is active
+  // Fetch exact custom From-To date range sales from server daily buckets (or local buckets when uploaded)
   useEffect(() => {
     if (!filters.salesPeriod.startsWith('range:')) {
       setIsLoadingRangeSales(false);
@@ -664,22 +780,50 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
     const csvUrl = convertGoogleSheetUrlToCsv(connectedSalesUrl) || connectedSalesUrl;
     const expectedKey = `${csvUrl}|${rangeSpec}`;
+
+    if (localDailyBuckets) {
+      const computed = computeRangeSalesFromBuckets(localDailyBuckets, from, to);
+      setRangeSalesData({
+        key: expectedKey,
+        bySimplified: computed.bySimplified,
+        activeDays: computed.activeDays,
+      });
+      setIsLoadingRangeSales(false);
+      setRangeSalesError(null);
+      return;
+    }
+
     if (rangeSalesData?.key === expectedKey) return;
 
     const controller = new AbortController();
     setIsLoadingRangeSales(true);
     setRangeSalesError(null);
 
-    fetch(
-      `/api/sales-range?url=${encodeURIComponent(csvUrl)}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&_t=${Date.now()}`,
-      { cache: 'no-store', signal: controller.signal }
-    )
-      .then(async (res) => {
-        if (!res.ok) {
-          const errJson = await res.json().catch(() => null);
-          throw new Error(errJson?.error || `HTTP ${res.status} loading date range sales.`);
+    const requestRange = async () => {
+      const res = await fetch(
+        `/api/sales-range?url=${encodeURIComponent(csvUrl)}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&_t=${Date.now()}`,
+        { cache: 'no-store', signal: controller.signal }
+      );
+      if (!res.ok) {
+        const isJson = (res.headers.get('content-type') || '').includes('application/json');
+        const errJson = isJson ? await res.json().catch(() => null) : null;
+        const err: any = new Error(errJson?.error || `HTTP ${res.status} loading date range sales.`);
+        err.status = res.status;
+        err.isNonJsonEndpointError = !isJson;
+        throw err;
+      }
+      return res.json();
+    };
+
+    requestRange()
+      .catch(async (firstErr: any) => {
+        if (controller.signal.aborted || firstErr?.name === 'AbortError') throw firstErr;
+        if (firstErr?.isNonJsonEndpointError || !firstErr?.status || firstErr.status >= 500) {
+          await new Promise((r) => setTimeout(r, 1200));
+          if (controller.signal.aborted) throw firstErr;
+          return requestRange();
         }
-        return res.json();
+        throw firstErr;
       })
       .then((data) => {
         if (controller.signal.aborted) return;
@@ -700,7 +844,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       });
 
     return () => controller.abort();
-  }, [filters.salesPeriod, connectedSalesUrl, rangeSalesData?.key]);
+  }, [filters.salesPeriod, connectedSalesUrl, rangeSalesData?.key, localDailyBuckets]);
 
   // Fast sales lookup helpers keyed by normalized Simplified name
   const getItemSalesRecord = useCallback(
@@ -1125,6 +1269,8 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         isLoadingRangeSales,
         rangeSalesError,
         syncSalesSheet,
+        importSalesCsvData,
+        localSalesConsumptionIndex,
         getItemSales,
         getItemSalesRecord,
         autoSyncEnabled,

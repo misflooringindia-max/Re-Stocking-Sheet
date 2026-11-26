@@ -47,7 +47,7 @@ export const ConsumptionCalculatorModal: React.FC<ConsumptionCalculatorModalProp
   isOpen,
   onClose,
 }) => {
-  const { items, connectedSalesUrl } = useInventory();
+  const { items, connectedSalesUrl, localSalesConsumptionIndex } = useInventory();
 
   // Source A: Sales_Data state
   const [salesMode, setSalesMode] = useState<SalesSourceMode>('live');
@@ -139,12 +139,39 @@ export const ConsumptionCalculatorModal: React.FC<ConsumptionCalculatorModalProp
         forceRefresh ? '&refresh=1' : ''
       }&_t=${Date.now()}`;
 
-      const res = await fetch(url, { cache: 'no-store' });
-      if (!res.ok) {
-        const err = await res.json().catch(() => null);
-        throw new Error(err?.error || `HTTP ${res.status} loading sales sheet.`);
+      const attempt = async () => {
+        const res = await fetch(url, { cache: 'no-store' });
+        if (!res.ok) {
+          const isJson = (res.headers.get('content-type') || '').includes('application/json');
+          const errJson = isJson ? await res.json().catch(() => null) : null;
+          const err: any = new Error(errJson?.error || `HTTP ${res.status} loading sales sheet.`);
+          err.status = res.status;
+          err.isNonJsonEndpointError = !isJson;
+          throw err;
+        }
+        return (await res.json()) as SalesConsumptionIndex;
+      };
+
+      let data: SalesConsumptionIndex;
+      try {
+        data = await attempt();
+      } catch (firstErr: any) {
+        if (firstErr?.isNonJsonEndpointError || !firstErr?.status || firstErr.status >= 500) {
+          await new Promise((r) => setTimeout(r, 1200));
+          try {
+            data = await attempt();
+          } catch (retryErr: any) {
+            if (localSalesConsumptionIndex) {
+              data = localSalesConsumptionIndex;
+            } else {
+              throw retryErr;
+            }
+          }
+        } else {
+          throw firstErr;
+        }
       }
-      const data: SalesConsumptionIndex = await res.json();
+
       setSalesIndex(data);
       setLoadedSalesUrl(rawTarget);
       if ((!rangeInitialized || forceRefresh) && data.maxDateVal > 0) {
